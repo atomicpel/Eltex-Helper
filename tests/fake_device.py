@@ -1,8 +1,13 @@
 """Маленький «поддельный» Eltex на псевдотерминале — для проверки работы
 через консольный порт настоящим netmiko, без железа (только Linux/macOS)."""
 import os
+import select
 import threading
-import tty
+
+try:
+    import tty  # нет в Windows: там тесты с псевдотерминалом пропускаются
+except ImportError:  # pragma: no cover
+    tty = None
 
 
 class FakeEltex:
@@ -19,7 +24,11 @@ class FakeEltex:
         self._t.start()
 
     def close(self):
+        # Сначала останавливаем поток и только потом закрываем дескрипторы:
+        # иначе освободившийся номер дескриптора достанется новому сокету
+        # (например, SSH в следующем тесте), и старый поток начнёт читать из него.
         self._stop = True
+        self._t.join(timeout=2)
         for fd in (self.master, self.slave):
             try:
                 os.close(fd)
@@ -44,8 +53,11 @@ class FakeEltex:
         buf = ""
         while not self._stop:
             try:
+                ready, _, _ = select.select([self.master], [], [], 0.1)
+                if not ready:
+                    continue
                 data = os.read(self.master, 1024).decode(errors="ignore")
-            except OSError:
+            except (OSError, ValueError):
                 return
             for ch in data:
                 if self.state == "yn":

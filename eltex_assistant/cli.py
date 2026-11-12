@@ -195,6 +195,7 @@ def _select_devices(args):
         return [automation.Device(
             name=args.host or serial_port, host=args.host or serial_port, model=args.model,
             username=args.user or "admin", transport=transport, serial_port=serial_port, baud=args.baud,
+            port=args.port,
         )]
     if not args.inventory:
         sys.exit("Укажите --host АДРЕС -m МОДЕЛЬ, --serial COM3 -m МОДЕЛЬ или --inventory файл.yaml")
@@ -404,6 +405,7 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("-d", "--device", action="append", help="имя устройства из инвентаря (можно несколько)")
         sp.add_argument("--host", help="адрес одного устройства (вместо инвентаря)")
         sp.add_argument("-u", "--user", help="логин (для --host / --serial)")
+        sp.add_argument("--port", type=int, help="нестандартный TCP-порт (для --host)")
         sp.add_argument("--telnet", action="store_true", help="подключаться по telnet вместо SSH (для --host)")
         sp.add_argument("--serial", metavar="ПОРТ", help="работать через консольный порт: COM3, /dev/ttyUSB0")
         sp.add_argument("--baud", type=int, default=115200, help="скорость консоли (по умолчанию 115200)")
@@ -456,11 +458,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
-    if hasattr(sys.stdout, "reconfigure"):
-        try:
-            sys.stdout.reconfigure(encoding="utf-8")  # корректная кириллица в Windows-консоли
-        except Exception:  # noqa: BLE001
-            pass
+    for stream in (sys.stdout, sys.stderr):  # корректная кириллица в Windows при выводе в файл или конвейер
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8")
+            except Exception:  # noqa: BLE001
+                pass
     args = build_parser().parse_args(argv)
     args.func(args)
 
