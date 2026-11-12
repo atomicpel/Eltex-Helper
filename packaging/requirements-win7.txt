@@ -1,0 +1,11 @@
+# Версии библиотек для Windows 7 (Python 3.8 — последний, который на ней работает).
+# cryptography и bcrypt взяты старых веток намеренно: новые собраны на Rust,
+# который больше не поддерживает Windows 7.
+netmiko==4.4.0
+paramiko==3.5.1
+cryptography==3.3.2
+bcrypt==3.2.2
+pynacl==1.5.0
+PyYAML
+Jinja2
+pyserial

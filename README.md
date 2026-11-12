@@ -14,7 +14,7 @@
 
 ## Установка
 
-Нужен Python 3.9+ (Windows, Linux, macOS).
+Нужен Python 3.8+ (Windows, Linux, macOS).
 
 ```
 pip install ./eltex-assistant
@@ -59,6 +59,16 @@ eltex show remote-connect -m MES2324
 ```
 
 Коротко: `show lldp neighbors gigabitethernet 1/0/N` покажет адрес управления соседа, затем `ping` и `telnet <IP>` (или `ssh <IP>`, если клиент есть в вашей версии ПО). Связь будет, только если VLAN управления разрешён в транке на обоих концах.
+
+## Переносной пакет для Windows 7
+
+Windows 7 поддерживает Python не новее 3.8, а свежие библиотеки шифрования на ней не работают, поэтому для неё собирается отдельный пакет: Python 3.8.10 и проверенные версии библиотек внутри, без установки и без интернета.
+
+```
+python packaging/build_win7.py        # dist/EltexHelper-<версия>-win7-x64.zip и -x86.zip
+```
+
+На Windows 7: распаковать и запустить `EltexHelper.bat` (графический интерфейс) или `eltex.bat` (командная строка). Нужны Service Pack 1, обновление KB2999226 и браузер Chrome 109 или Firefox 115 ESR.
 
 ## Примеры
 

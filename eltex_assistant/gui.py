@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import threading
 import uuid
@@ -115,7 +116,7 @@ class App:
 
     def inventory_get(self, _q) -> dict:
         if not self.inventory_path.exists():
-            return {"path": str(self.inventory_path.resolve()), "devices": []}
+            return {"path": os.path.abspath(self.inventory_path), "devices": []}
         data = yaml.safe_load(self.inventory_path.read_text(encoding="utf-8")) or {}
         defaults = data.get("defaults") or {}
         devices = []
@@ -123,7 +124,7 @@ class App:
             d = {**defaults, **(d or {})}
             d.pop("password", None)  # пароли из файла в браузер не отдаём
             devices.append({"name": name, **d})
-        return {"path": str(self.inventory_path.resolve()), "devices": devices}
+        return {"path": os.path.abspath(self.inventory_path), "devices": devices}
 
     def inventory_save(self, body) -> dict:
         devices = {}
@@ -227,7 +228,7 @@ class App:
 
         def work(job):
             path, diff = automation.backup(dev, password, self.inventory_path.parent / "backups")
-            return {"path": str(path.resolve()), "diff": diff, "config": path.read_text(encoding="utf-8")}
+            return {"path": os.path.abspath(path), "diff": diff, "config": path.read_text(encoding="utf-8")}
 
         return {"job": self.jobs.start(self._wrap(dev, work))}
 

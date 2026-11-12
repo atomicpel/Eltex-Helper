@@ -429,3 +429,82 @@ def test_gui_run_reports_connection_error(web, monkeypatch):
     monkeypatch.setattr(automation, "connect", boom)
     _, r = web("/api/run", {"target": {"host": "10.0.0.2", "model": "MES2324"}, "commands": "show version"})
     assert "Устройство не отвечает (10.0.0.2)" in web.wait(r["job"])["error"]
+
+
+# ------------------------------------------------- настоящий SSH: paramiko-сервер + фейковое устройство
+
+@needs_pty
+def test_real_ssh_session_end_to_end():
+    """Проверяет всю цепочку SSH (шифрование, вход, команды, сохранение) без железа."""
+    import os
+    import select
+
+    import paramiko
+
+    fake = FakeEltex(logged_in=True)
+    host_key = paramiko.RSAKey.generate(2048)
+
+    class Server(paramiko.ServerInterface):
+        def check_auth_password(self, username, password):
+            ok = (username, password) == ("netadmin", "s3cret")
+            return paramiko.AUTH_SUCCESSFUL if ok else paramiko.AUTH_FAILED
+
+        def get_allowed_auths(self, username):
+            return "password"
+
+        def check_channel_request(self, kind, chanid):
+            return paramiko.OPEN_SUCCEEDED
+
+        def check_channel_shell_request(self, channel):
+            return True
+
+        def check_channel_pty_request(self, *a):
+            return True
+
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(5)
+    port = listener.getsockname()[1]
+
+    def serve():
+        while True:
+            try:
+                client, _ = listener.accept()
+            except OSError:
+                return
+            t = paramiko.Transport(client)
+            t.add_server_key(host_key)
+            try:
+                t.start_server(server=Server())
+            except Exception:  # noqa: BLE001 — неудачный вход
+                continue
+            chan = t.accept(10)
+            if chan is None:
+                continue
+            os.write(fake.slave, b"\r")  # показать приглашение
+            while t.is_active():  # мост: SSH-канал <-> «консоль» фейкового устройства
+                r, _, _ = select.select([chan, fake.slave], [], [], 0.2)
+                try:
+                    if chan in r:
+                        data = chan.recv(1024)
+                        if not data:
+                            break
+                        os.write(fake.slave, data)
+                    if fake.slave in r:
+                        chan.send(os.read(fake.slave, 1024))
+                except OSError:
+                    break
+            t.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    dev = automation.Device("sw", "127.0.0.1", "MES2324", username="netadmin", port=port)
+    try:
+        assert "ip address 10.0.0.2" in automation.run_commands(dev, "s3cret", ["show running-config"])
+        automation.push(dev, "s3cret", "hostname NEW", log=lambda *_: None)
+        assert "hostname NEW" in fake.received and fake.received[-1] == "Y"
+        with pytest.raises(Exception) as bad:
+            automation.run_commands(dev, "wrong", ["show version"])
+        assert "Неверный логин или пароль" in automation.friendly_error(bad.value, dev)
+    finally:
+        listener.close()
+        fake.close()
