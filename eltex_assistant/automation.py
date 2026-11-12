@@ -96,8 +96,25 @@ def connect(dev: Device, password: str):
     """
     from netmiko.ssh_dispatcher import CLASS_MAPPER  # импорт здесь, чтобы справочник работал и без netmiko
 
-    cls = CLASS_MAPPER[dev.netmiko_type]
-    common = dict(username=dev.username, password=password, fast_cli=False)
+    base = CLASS_MAPPER[dev.netmiko_type]
+    paging_cmds = list(knowledge.families()[dev.family].get("paging_off_variants")
+                       or [knowledge.families()[dev.family].get("paging_off", "terminal datadump")])
+
+    class cls(base):  # type: ignore[misc, valid-type]
+        def session_preparation(self) -> None:
+            # Штатная подготовка netmiko шлёт только «terminal datadump», которой нет на MES24xx.
+            # Пробуем варианты по очереди и запоминаем, удалось ли отключить постраничный вывод.
+            self.ansi_escape_codes = True
+            self._test_channel_read(pattern=r"[>#]")
+            self.set_base_prompt()
+            self.paging_disabled = False
+            for cmd in paging_cmds:
+                out = self._send_command_timing_str(cmd, read_timeout=10, last_read=0.5)
+                if not re.search(CLI_ERROR, out):
+                    self.paging_disabled = True
+                    break
+
+    common = dict(username=dev.username, password=password, fast_cli=dev.transport != "serial")
     if dev.transport == "serial":
         if not dev.serial_port:
             raise ValueError(f"{dev.name}: для transport: serial нужен serial_port (COM3, /dev/ttyUSB0)")
@@ -147,12 +164,36 @@ def list_serial_ports() -> list[tuple[str, str]]:
 
 # ---------------------------------------------------------------- выполнение команд
 
+MORE = re.compile(r"-+ ?\(?more\)?[^\n]*?-+|<--- ?more ?--->|more: <space>[^\n]*", re.I)
+
+
+def send_show(conn, cmd: str, read_timeout: float = 60) -> str:
+    """send_command, который сам листает «--More--», если отключить постраничный вывод не удалось."""
+    prompt = re.escape(conn.base_prompt)
+    pattern = rf"(?i)(?:{prompt}[^\n]*[>#]\s*$|{MORE.pattern})"
+    out = conn.send_command(cmd, expect_string=pattern, read_timeout=read_timeout)
+    pages = 0
+    while MORE.search(out[-120:]) and pages < 2000:
+        pages += 1
+        out = MORE.sub("", out)
+        out += conn.send_command(" ", expect_string=pattern, read_timeout=read_timeout, normalize=False,
+                                 strip_prompt=True, strip_command=False, cmd_verify=False, auto_find_prompt=False)
+    out = MORE.sub("", out)
+    out = re.sub(r"\x1b\[[0-9;]*[A-Za-z]|\x08", "", out)
+    out = re.sub(r"\r +\r", "", out)
+    lines = [ln.rstrip() for ln in out.splitlines()]
+    # хвост с приглашением мог остаться, если оно пришло вместе с последней страницей
+    while lines and re.fullmatch(rf"{prompt}[^\n]*[>#]", lines[-1].strip()):
+        lines.pop()
+    return "\n".join(lines).strip("\n")
+
+
 def run_commands(dev: Device, password: str, cmds: list[str]) -> str:
     with connect(dev, password) as conn:
         parts = []
+        prompt = conn.find_prompt()
         for c in cmds:
-            out = conn.send_command(c, read_timeout=60)
-            parts.append(f"{conn.find_prompt()} {c}\n{out}")
+            parts.append(f"{prompt} {c}\n{send_show(conn, c)}")
         return "\n".join(parts)
 
 
@@ -172,7 +213,7 @@ def run_many(devs: list[Device], passwords: dict[str, str], cmds: list[str], wor
 def backup(dev: Device, password: str, out_dir: str | Path) -> tuple[Path, str]:
     """Сохраняет running-config в out_dir/<имя>/<дата>.cfg и возвращает diff с прошлым бэкапом."""
     with connect(dev, password) as conn:
-        cfg = conn.send_command("show running-config", read_timeout=120)
+        cfg = send_show(conn, "show running-config", read_timeout=120)
     folder = Path(out_dir) / dev.name
     folder.mkdir(parents=True, exist_ok=True)
     previous = sorted(folder.glob("*.cfg"))

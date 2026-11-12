@@ -66,6 +66,8 @@ def expand_targets(spec: str) -> list[str]:
             out += [str(ipaddress.ip_address(i)) for i in range(int(start), int(end) + 1)]
         elif "/" in part:
             net = ipaddress.ip_network(part, strict=False)
+            if net.num_addresses > MAX_HOSTS + 2:
+                raise ValueError(f"Слишком много адресов в {part} (больше {MAX_HOSTS}). Сканируйте по частям.")
             out += [str(h) for h in net.hosts()] or [str(net.network_address)]
         else:
             out.append(str(ipaddress.ip_address(part)))
