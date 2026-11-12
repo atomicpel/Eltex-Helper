@@ -27,6 +27,8 @@ families:
     save: "write startup-config"
     save_prompt_answer: null
     paging_off: "terminal datadump"
+    # на разных прошивках MES24xx отключение постраничного вывода называется по-разному
+    paging_off_variants: ["terminal datadump", "terminal length 0", "set cli pagination off"]
     config_enter: "configure terminal"
     default_login: "admin / admin"
     notes:
@@ -79,6 +81,10 @@ models:
     description: "Коммутатор серии MES24xx (семейство требует подтверждения по «show version»)"
     unverified: true
   MES2408:
+    family: mes24xx
+    kind: switch
+    description: "Коммутатор доступа серии MES24xx"
+  MES2408B:
     family: mes24xx
     kind: switch
     description: "Коммутатор доступа серии MES24xx"

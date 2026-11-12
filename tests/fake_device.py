@@ -11,8 +11,18 @@ except ImportError:  # pragma: no cover
 
 
 class FakeEltex:
-    def __init__(self, family="mes23xx", hostname="sw1", logged_in=False):
+    MORE = "--More--"
+
+    def __init__(self, family="mes23xx", hostname="sw1", logged_in=False, paging_off=("terminal datadump",),
+                 config_lines=0):
+        """paging_off — какие команды устройство понимает для отключения постраничного вывода
+        (у MES24xx это не «terminal datadump»); config_lines — дополнительные строки в
+        show running-config, чтобы вывод не помещался на одну страницу."""
         self.family, self.hostname = family, hostname
+        self.paging_off = tuple(paging_off)
+        self.paging = True
+        self.pending: list[str] = []
+        self.extra = [f"interface gigabitethernet 0/{i}\n description port{i}" for i in range(1, config_lines + 1)]
         self.master, self.slave = os.openpty()
         tty.setraw(self.slave)
         self.port = os.ttyname(self.slave)
@@ -49,6 +59,17 @@ class FakeEltex:
         else:
             self._w(f"\n{self.hostname}{'(config)' if self.config else ''}#")
 
+    def _page(self):
+        page = 20 if self.paging else len(self.pending)
+        chunk, self.pending = self.pending[:page], self.pending[page:]
+        self._w("\n".join(chunk))
+        if self.pending:
+            self._w("\n" + self.MORE)
+            self.state = "more"
+        else:
+            self.state = "exec"
+            self._prompt()
+
     def _loop(self):
         buf = ""
         while not self._stop:
@@ -60,6 +81,15 @@ class FakeEltex:
             except (OSError, ValueError):
                 return
             for ch in data:
+                if self.state == "more":
+                    if ch in " \r\n":
+                        self._w("\r        \r")  # как настоящий коммутатор: стираем «--More--»
+                        self._page()
+                    elif ch in "qQ":
+                        self.pending, self.state = [], "exec"
+                        self._w("\r        \r")
+                        self._prompt()
+                    continue
                 if self.state == "yn":
                     self.received.append(ch)
                     self.state = "exec"
@@ -87,10 +117,17 @@ class FakeEltex:
                 self.config = True
             elif low in ("end", "exit"):
                 self.config = False
-            elif low == "terminal datadump" or low.startswith("hostname ") and self.config:
+            elif low in self.paging_off:
+                self.paging = False
+            elif low.startswith("hostname ") and self.config:
                 pass
             elif low == "show running-config":
-                self._w(f"\nhostname {self.hostname}\ninterface vlan 1\n ip address 10.0.0.2 255.255.255.0")
+                text = f"hostname {self.hostname}\ninterface vlan 1\n ip address 10.0.0.2 255.255.255.0"
+                text += "".join("\n" + e for e in self.extra) + "\nend-of-config"
+                self.pending = text.split("\n")
+                self._w("\n")
+                self._page()
+                return
             elif low == "copy running-config startup-config" and self.family == "mes23xx":
                 self._w("\nOverwrite file [startup-config].... (Y/N)[N] ?")
                 self.state = "yn"

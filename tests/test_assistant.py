@@ -198,7 +198,7 @@ def serial_dev(monkeypatch):
     monkeypatch.setattr(bc, "check_serial_port", lambda name: name)  # pty нет в списке COM-портов
     created = []
 
-    def make(family="mes23xx", model="MES2324", **kw):
+    def make(family="mes23xx", model="MES2324", **kw):  # noqa: ANN001
         fake = FakeEltex(family=family, **kw)
         created.append(fake)
         return fake, automation.Device("con", "console", model, transport="serial", serial_port=fake.port)
@@ -528,3 +528,19 @@ def test_missing_dependency_message(tmp_path):
     err = r.stderr.decode("utf-8", "replace")
     assert r.returncode == 1 and "PyYAML" in err and "pip install ." in err
     assert "Traceback" in (tmp_path / "eltex-helper-error.log").read_text(encoding="utf-8")
+
+
+# ------------------------------------------------- постраничный вывод (MES24xx не знает «terminal datadump»)
+
+@needs_pty
+@pytest.mark.parametrize("paging_off", [("terminal length 0",), ("set cli pagination off",), ()],
+                         ids=["terminal-length", "set-cli-pagination", "no-way-to-disable"])
+def test_long_output_on_mes24xx_is_fast_and_complete(serial_dev, paging_off):
+    fake, dev = serial_dev(family="mes24xx", model="MES2408B", logged_in=True, paging_off=paging_off,
+                           config_lines=60)
+    start = time.monotonic()
+    out = automation.run_commands(dev, "pw", ["show running-config", "show running-config"])
+    elapsed = time.monotonic() - start
+    assert out.count("end-of-config") == 2 and out.count("description port60") == 2
+    assert "More" not in out
+    assert elapsed < 25, f"слишком долго: {elapsed:.0f} с"
