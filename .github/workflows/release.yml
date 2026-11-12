@@ -1,0 +1,59 @@
+name: Релиз
+
+# Выпуск создаётся сам, когда в main попадает новая версия
+# (eltex_assistant/__init__.py: __version__), либо вручную кнопкой Run workflow.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Версия
+        id: v
+        run: |
+          VER=$(python -c "import re;print(re.search(r'__version__ = \"([^\"]+)\"', open('eltex_assistant/__init__.py', encoding='utf-8').read()).group(1))")
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          if gh release view "v$VER" >/dev/null 2>&1; then
+            echo "Релиз v$VER уже есть — пропускаю."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Тесты
+        if: steps.v.outputs.exists != 'true'
+        run: |
+          pip install . pytest
+          python -m pytest -q
+
+      - name: Сборка
+        if: steps.v.outputs.exists != 'true'
+        run: |
+          python packaging/build_win7.py
+          pip wheel --no-deps -w dist .
+          cd dist && sha256sum EltexHelper-*.zip eltex_assistant-*.whl > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - name: Публикация
+        if: steps.v.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VER: ${{ steps.v.outputs.version }}
+        run: |
+          NOTES=packaging/release-notes.md
+          sed "s/{version}/$VER/g" "$NOTES" > /tmp/notes.md
+          gh release create "v$VER" --target "$GITHUB_SHA" --title "Помощник Eltex $VER" --notes-file /tmp/notes.md \
+            dist/EltexHelper-$VER-win7-x64.zip dist/EltexHelper-$VER-win7-x86.zip \
+            dist/eltex_assistant-$VER-py3-none-any.whl dist/SHA256SUMS.txt

@@ -2,7 +2,11 @@
 через консольный порт настоящим netmiko, без железа (только Linux/macOS)."""
 import os
 import threading
-import tty
+
+try:
+    import tty  # нет в Windows: там тесты с псевдотерминалом пропускаются
+except ImportError:  # pragma: no cover
+    tty = None
 
 
 class FakeEltex:
