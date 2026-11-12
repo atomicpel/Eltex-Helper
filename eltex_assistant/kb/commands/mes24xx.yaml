@@ -1,0 +1,184 @@
+# Команды для семейства mes24xx (MES2408, MES2428, MES2411X?).
+# Формат полей описан в mes23xx.yaml.
+# ВНИМАНИЕ: синтаксис этого семейства сверен хуже всего — большинство записей
+# помечены confidence: medium/low. Проверяйте через «?» и уточняйте базу.
+
+commands:
+  - id: show-version
+    title: Версия ПО, модель, серийный номер
+    tags: [версия, прошивка, firmware, version, модель]
+    mode: exec
+    commands: |
+      show version
+      show system information
+    confidence: medium
+
+  - id: show-running
+    title: Посмотреть текущую конфигурацию
+    tags: [конфиг, конфигурация, running, config, показать]
+    mode: exec
+    commands: |
+      show running-config
+    confidence: high
+
+  - id: save-config
+    title: Сохранить конфигурацию
+    tags: [сохранить, save, write, startup, запись]
+    mode: exec
+    commands: |
+      write startup-config
+    explain: "На MES24xx сохранение отличается от MES23xx: «copy running-config startup-config» может не работать."
+    confidence: medium
+
+  - id: hostname
+    title: Задать имя устройства
+    tags: [hostname, имя]
+    mode: config
+    commands: |
+      hostname <имя>
+    example: |
+      configure terminal
+      hostname SW-ACCESS-01
+    confidence: high
+
+  - id: mgmt-ip
+    title: IP-адрес управления и шлюз по умолчанию
+    tags: [ip, управление, management, адрес, шлюз, gateway]
+    mode: config
+    commands: |
+      interface vlan <VLAN>
+       ip address <IP> <МАСКА>
+       no shutdown
+      exit
+      ip route 0.0.0.0 0.0.0.0 <ШЛЮЗ>
+    confidence: medium
+
+  - id: user-create
+    title: Создать пользователя
+    tags: [пользователь, user, username, пароль, password]
+    mode: config
+    commands: |
+      username <логин> password <пароль> privilege 15
+    confidence: medium
+
+  - id: ssh-enable
+    title: Включить SSH
+    tags: [ssh, telnet, доступ]
+    mode: config
+    commands: |
+      ip ssh server
+    confidence: low
+
+  - id: vlan-create
+    title: Создать VLAN
+    tags: [vlan, влан, создать]
+    mode: config
+    commands: |
+      vlan <ID>
+       name <имя>
+      exit
+    explain: "На MES24xx VLAN создаётся прямо в режиме config, без vlan database."
+    confidence: medium
+
+  - id: port-access
+    title: Порт доступа (access) в VLAN
+    tags: [access, порт, vlan, абонент, untagged]
+    mode: interface
+    commands: |
+      interface gigabitethernet 0/<N>
+       switchport mode access
+       switchport access vlan <ID>
+       no shutdown
+      exit
+    explain: "Имена портов на MES24xx в формате 0/N, а не 1/0/N."
+    confidence: medium
+
+  - id: port-trunk
+    title: Транковый порт (trunk)
+    tags: [trunk, транк, тег, tagged, аплинк, uplink]
+    mode: interface
+    commands: |
+      interface gigabitethernet 0/<N>
+       switchport mode trunk
+       switchport trunk allowed vlan <список>
+       no shutdown
+      exit
+    confidence: low
+
+  - id: interface-range
+    title: Настроить сразу несколько портов
+    tags: [range, диапазон, несколько]
+    mode: config
+    commands: |
+      interface range gigabitethernet 0/<N>-<M>
+    confidence: medium
+
+  - id: show-interfaces
+    title: Состояние портов
+    tags: [порты, интерфейсы, status, линк, состояние]
+    mode: exec
+    commands: |
+      show interfaces status
+      show interface description
+    confidence: low
+
+  - id: show-vlan
+    title: Список VLAN
+    tags: [vlan, показать, show]
+    mode: exec
+    commands: |
+      show vlan
+    confidence: high
+
+  - id: show-mac
+    title: Таблица MAC-адресов
+    tags: [mac, мак, fdb, найти]
+    mode: exec
+    commands: |
+      show mac-address-table
+    explain: "Обратите внимание: через дефис (mac-address-table), в отличие от MES23xx."
+    confidence: low
+
+  - id: stp
+    title: Spanning Tree
+    tags: [stp, rstp, spanning-tree, петля]
+    mode: config
+    commands: |
+      spanning-tree mode rst
+    confidence: low
+
+  - id: ping-trace
+    title: Проверка связи
+    tags: [ping, пинг, связь]
+    mode: exec
+    commands: |
+      ping <IP>
+    confidence: high
+
+  - id: reload
+    title: Перезагрузка
+    tags: [reload, перезагрузка, reboot]
+    mode: exec
+    commands: |
+      reload
+    confidence: high
+
+  - id: lldp-neighbors
+    title: Соседние устройства по LLDP
+    tags: [lldp, сосед, соседи, neighbors, топология, подключён]
+    mode: exec
+    commands: |
+      show lldp neighbors
+      show lldp neighbors detail
+    confidence: low
+
+  - id: remote-connect
+    title: Подключиться с этого коммутатора к соседнему
+    tags: [telnet, ssh, сосед, перейти, подключиться, зайти, другой, коммутатор, транк]
+    mode: exec
+    commands: |
+      show lldp neighbors
+      ping <IP соседа>
+      telnet <IP соседа>
+    explain: "VLAN управления должен быть разрешён в транке на обоих концах."
+    confidence: low

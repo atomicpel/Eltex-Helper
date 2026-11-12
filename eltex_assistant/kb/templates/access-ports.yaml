@@ -1,0 +1,45 @@
+name: access-ports
+title: Абонентские порты в VLAN + транковый аплинк
+kind: switch
+params:
+  vlan: {help: "VLAN абонентов", required: true}
+  vlan_name: {help: "Имя VLAN", default: "USERS"}
+  ports: {help: "Диапазон абонентских портов, например 1-8", required: true}
+  uplink: {help: "Аплинк, например «gigabitethernet 1/0/10» или «tengigabitethernet 1/0/1»", required: true}
+  uplink_vlans: {help: "VLAN на аплинке через запятую", required: true}
+bodies:
+  mes23xx: |
+    configure
+    vlan database
+     vlan {{ vlan }}
+    exit
+    interface vlan {{ vlan }}
+     name {{ vlan_name }}
+    exit
+    interface range gigabitethernet 1/0/{{ ports }}
+     switchport mode access
+     switchport access vlan {{ vlan }}
+     spanning-tree portfast
+     spanning-tree bpduguard enable
+    exit
+    interface {{ uplink }}
+     switchport mode trunk
+     switchport trunk allowed vlan add {{ uplink_vlans }}
+    exit
+    end
+  mes24xx: |
+    configure terminal
+    vlan {{ vlan }}
+     name {{ vlan_name }}
+    exit
+    interface range gigabitethernet 0/{{ ports }}
+     switchport mode access
+     switchport access vlan {{ vlan }}
+     no shutdown
+    exit
+    interface {{ uplink }}
+     switchport mode trunk
+     switchport trunk allowed vlan {{ uplink_vlans }}
+     no shutdown
+    exit
+    end

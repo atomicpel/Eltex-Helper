@@ -1,0 +1,108 @@
+name: esr-office
+title: ESR для офиса — WAN, LAN, NAT в интернет, DHCP, зоны безопасности, SSH из LAN
+kind: router
+params:
+  hostname: {help: "Имя маршрутизатора", default: "ESR-OFFICE"}
+  wan_if: {help: "WAN-интерфейс", default: "gigabitethernet 1/0/1"}
+  wan_ip: {help: "WAN IP/префикс или dhcp", default: "dhcp"}
+  wan_gw: {help: "Шлюз провайдера (если WAN не dhcp)", default: ""}
+  lan_if: {help: "LAN-интерфейс", default: "gigabitethernet 1/0/2"}
+  lan_ip: {help: "LAN IP шлюза", default: "192.168.1.1"}
+  lan_prefix: {help: "Префикс LAN", default: "24"}
+  lan_net: {help: "Сеть LAN", default: "192.168.1.0"}
+  dhcp_start: {help: "Начало пула DHCP", default: "192.168.1.100"}
+  dhcp_end: {help: "Конец пула DHCP", default: "192.168.1.200"}
+  dns: {help: "DNS для клиентов", default: "8.8.8.8"}
+  admin_password: {help: "Новый пароль admin", required: true, secret: true}
+bodies:
+  esr: |
+    configure
+    hostname {{ hostname }}
+    username admin
+     password {{ admin_password }}
+    exit
+    security zone trusted
+    exit
+    security zone untrusted
+    exit
+    object-group network LAN
+     ip prefix {{ lan_net }}/{{ lan_prefix }}
+    exit
+    object-group service SSH
+     port-range 22
+    exit
+    object-group service DHCP_SERVER
+     port-range 67
+    exit
+    object-group service DHCP_CLIENT
+     port-range 68
+    exit
+    interface {{ wan_if }}
+     description WAN
+     security-zone untrusted
+     {% if wan_ip == "dhcp" %}ip address dhcp{% else %}ip address {{ wan_ip }}{% endif %}
+    exit
+    interface {{ lan_if }}
+     description LAN
+     security-zone trusted
+     ip address {{ lan_ip }}/{{ lan_prefix }}
+    exit
+    {% if wan_gw %}ip route 0.0.0.0/0 {{ wan_gw }}{% endif %}
+    security zone-pair trusted untrusted
+     rule 1
+      action permit
+      enable
+     exit
+    exit
+    security zone-pair trusted trusted
+     rule 1
+      action permit
+      enable
+     exit
+    exit
+    security zone-pair trusted self
+     rule 10
+      action permit
+      match protocol tcp
+      match destination-port SSH
+      enable
+     exit
+     rule 20
+      action permit
+      match protocol udp
+      match destination-port DHCP_SERVER
+      enable
+     exit
+     rule 30
+      action permit
+      match protocol icmp
+      enable
+     exit
+    exit
+    security zone-pair untrusted self
+     rule 1
+      action permit
+      match protocol udp
+      match destination-port DHCP_CLIENT
+      enable
+     exit
+    exit
+    nat source
+     ruleset INTERNET
+      to interface {{ wan_if }}
+      rule 1
+       match source-address LAN
+       action source-nat interface
+       enable
+      exit
+     exit
+    exit
+    ip dhcp-server
+    ip dhcp-server pool LAN
+     network {{ lan_net }}/{{ lan_prefix }}
+     address-range {{ dhcp_start }}-{{ dhcp_end }}
+     default-router {{ lan_ip }}
+     dns-server {{ dns }}
+    exit
+    ip ssh server
+    end

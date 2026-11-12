@@ -1,0 +1,44 @@
+name: switch-base
+title: Базовая настройка коммутатора (имя, управление, пользователь, SSH, время, логи)
+kind: switch
+params:
+  hostname: {help: "Имя коммутатора", default: "SW-01"}
+  mgmt_vlan: {help: "VLAN управления", default: "1"}
+  mgmt_ip: {help: "IP управления", required: true}
+  mgmt_mask: {help: "Маска", default: "255.255.255.0"}
+  gateway: {help: "Шлюз по умолчанию", required: true}
+  admin_user: {help: "Логин администратора", default: "netadmin"}
+  admin_password: {help: "Пароль администратора", required: true, secret: true}
+  ntp_server: {help: "NTP/SNTP сервер", default: "pool.ntp.org"}
+  syslog_server: {help: "Syslog-сервер (пусто = не настраивать)", default: ""}
+bodies:
+  mes23xx: |
+    configure
+    hostname {{ hostname }}
+    vlan database
+     vlan {{ mgmt_vlan }}
+    exit
+    interface vlan {{ mgmt_vlan }}
+     ip address {{ mgmt_ip }} {{ mgmt_mask }}
+    exit
+    ip default-gateway {{ gateway }}
+    username {{ admin_user }} password {{ admin_password }} privilege 15
+    ip ssh server
+    clock source sntp
+    sntp unicast client enable
+    sntp server {{ ntp_server }}
+    {% if syslog_server %}logging host {{ syslog_server }}{% endif %}
+    end
+  mes24xx: |
+    configure terminal
+    hostname {{ hostname }}
+    vlan {{ mgmt_vlan }}
+    exit
+    interface vlan {{ mgmt_vlan }}
+     ip address {{ mgmt_ip }} {{ mgmt_mask }}
+     no shutdown
+    exit
+    ip route 0.0.0.0 0.0.0.0 {{ gateway }}
+    username {{ admin_user }} password {{ admin_password }} privilege 15
+    ip ssh server
+    end

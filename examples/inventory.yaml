@@ -1,0 +1,30 @@
+# Пример инвентаря. Пароли сюда не пишите: задайте переменную окружения
+# ELTEX_PASSWORD (или ELTEX_PASSWORD_<ИМЯ_УСТРОЙСТВА>), иначе программа спросит.
+defaults:
+  username: netadmin
+
+devices:
+  sw-floor1:
+    host: 10.0.0.11
+    model: MES2324
+  sw-floor2:
+    host: 10.0.0.12
+    model: MES2308
+  sw-new:
+    host: 10.0.0.13
+    model: MES2411X
+  esr-office:
+    host: 10.0.0.1
+    model: ESR-12V
+  esr-branch:
+    host: 10.1.0.1
+    model: ESR-200
+    username: admin
+  sw-old-telnet:          # старая прошивка без SSH
+    host: 10.0.0.14
+    model: MES2308
+    transport: telnet
+  sw-on-console:          # через консольный кабель
+    model: MES2324
+    transport: serial
+    serial_port: COM3     # в Linux: /dev/ttyUSB0

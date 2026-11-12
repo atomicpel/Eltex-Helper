@@ -1,0 +1,373 @@
+# Команды для семейства esr (ESR-12V, ESR-15R, ESR-200 и др.).
+# Формат полей описан в mes23xx.yaml.
+# Главное отличие ESR: изменения не применяются, пока не выполнен commit,
+# и откатываются сами, если после commit не выполнен confirm.
+
+commands:
+  - id: show-version
+    title: Версия ПО, модель, серийный номер
+    tags: [версия, прошивка, firmware, version, модель]
+    mode: exec
+    commands: |
+      show version
+      show system
+    confidence: high
+
+  - id: show-running
+    title: Посмотреть конфигурацию (текущую и несохранённую)
+    tags: [конфиг, конфигурация, running, candidate, config, показать]
+    mode: exec
+    commands: |
+      show running-config
+      show candidate-config
+      show running-config interfaces
+    explain: "candidate-config — то, что вы ввели, но ещё не применили командой commit."
+    confidence: high
+
+  - id: save-config
+    title: Применить и сохранить конфигурацию (commit / confirm)
+    tags: [сохранить, save, commit, confirm, применить, write]
+    mode: exec
+    commands: |
+      commit
+      confirm
+    explain: "commit применяет candidate-конфигурацию и запускает таймер отката (по умолчанию 600 с). confirm подтверждает и сохраняет её. Если после commit вы потеряли доступ, просто подождите — ESR сам вернёт прежнюю конфигурацию. Отменить ввод до commit: «rollback»."
+    firmware: "Таймер настраивается командой «system config-confirm timeout <сек>» в режиме config."
+    confidence: high
+
+  - id: hostname
+    title: Задать имя устройства
+    tags: [hostname, имя]
+    mode: config
+    commands: |
+      hostname <имя>
+    confidence: high
+
+  - id: interface-ip
+    title: IP-адрес на интерфейсе
+    tags: [ip, адрес, интерфейс, interface, wan, lan]
+    mode: interface
+    commands: |
+      interface gigabitethernet 1/0/<N>
+       ip address <IP>/<префикс>
+       security-zone <зона>
+      exit
+    example: |
+      configure
+      interface gigabitethernet 1/0/1
+       description WAN
+       ip address 203.0.113.2/30
+       security-zone untrusted
+      exit
+    explain: "Адрес задаётся в формате IP/префикс. Без security-zone трафик через интерфейс блокируется межсетевым экраном (если он не выключен)."
+    confidence: high
+
+  - id: interface-dhcp-client
+    title: Получить адрес по DHCP (WAN от провайдера)
+    tags: [dhcp, client, клиент, wan, провайдер]
+    mode: interface
+    commands: |
+      interface gigabitethernet 1/0/<N>
+       ip address dhcp
+    confidence: high
+
+  - id: subinterface
+    title: Сабинтерфейс с VLAN-тегом (router-on-a-stick)
+    tags: [vlan, sub, сабинтерфейс, тег, dot1q, subinterface]
+    mode: config
+    commands: |
+      interface gigabitethernet 1/0/<N>.<VLAN>
+       ip address <IP>/<префикс>
+       security-zone <зона>
+    example: |
+      interface gigabitethernet 1/0/2.10
+       description USERS
+       ip address 192.168.10.1/24
+       security-zone trusted
+    confidence: high
+
+  - id: bridge
+    title: Bridge (объединить LAN-порты, L2-сегмент)
+    tags: [bridge, мост, lan, коммутация, vlan]
+    mode: config
+    commands: |
+      bridge <N>
+       vlan <ID>
+       ip address <IP>/<префикс>
+       security-zone trusted
+       enable
+      exit
+      interface gigabitethernet 1/0/<N>
+       bridge-group <N>
+    explain: "Так устроена заводская LAN-конфигурация ESR-12V/15R: LAN-порты в bridge 1 с адресом 192.168.1.1/24."
+    confidence: medium
+
+  - id: static-route
+    title: Статический маршрут и маршрут по умолчанию
+    tags: [маршрут, route, static, шлюз, gateway, default]
+    mode: config
+    commands: |
+      ip route <сеть>/<префикс> <next-hop>
+      ip route 0.0.0.0/0 <шлюз провайдера>
+    confidence: high
+
+  - id: security-zones
+    title: Зоны безопасности и правила межсетевого экрана
+    tags: [firewall, фаервол, зона, zone, security, правило, доступ]
+    mode: config
+    commands: |
+      security zone <имя>
+      exit
+      security zone-pair <откуда> <куда>
+       rule <номер>
+        action permit
+        match protocol <tcp|udp|icmp|any>
+        match destination-port <object-group service>
+        enable
+       exit
+      exit
+    example: |
+      security zone-pair trusted untrusted
+       rule 1
+        action permit
+        enable
+       exit
+      exit
+      security zone-pair trusted self
+       rule 1
+        action permit
+        enable
+       exit
+      exit
+    explain: "Зона «self» — сам маршрутизатор. Чтобы зайти на ESR по SSH из зоны, нужна пара <зона> self с разрешающим правилом. Не забывайте «enable» в правиле."
+    confidence: high
+
+  - id: firewall-disable
+    title: Выключить межсетевой экран на интерфейсе
+    tags: [firewall, фаервол, выключить, disable]
+    mode: interface
+    commands: |
+      ip firewall disable
+    explain: "Быстрый способ для теста или чисто транзитного интерфейса. Для боевых конфигураций лучше настроить зоны."
+    confidence: high
+
+  - id: object-group
+    title: Объектные группы (сети, порты)
+    tags: [object-group, группа, сети, порты, адреса]
+    mode: config
+    commands: |
+      object-group network <имя>
+       ip prefix <сеть>/<префикс>
+       ip address-range <IP1>-<IP2>
+      exit
+      object-group service <имя>
+       port-range <порт>[-<порт>]
+      exit
+    firmware: "В ранних версиях ПО (до ~1.4) «ip prefix» отсутствовал, использовался только «ip address-range»."
+    confidence: medium
+
+  - id: nat-source
+    title: NAT для выхода в интернет (source NAT / маскарадинг)
+    tags: [nat, snat, интернет, маскарадинг, masquerade, pat]
+    mode: config
+    commands: |
+      object-group network LAN
+       ip prefix <локальная сеть>/<префикс>
+      exit
+      nat source
+       ruleset <имя>
+        to interface <WAN-интерфейс>
+        rule 1
+         match source-address LAN
+         action source-nat interface
+         enable
+        exit
+       exit
+      exit
+    explain: "Нужен ещё маршрут по умолчанию и разрешающее правило зона LAN → зона WAN."
+    confidence: high
+
+  - id: nat-dnat
+    title: Проброс порта (destination NAT)
+    tags: [dnat, проброс, port forwarding, nat, порт]
+    mode: config
+    commands: |
+      object-group service <имя>
+       port-range <внешний порт>
+      exit
+      nat destination
+       pool <имя пула>
+        ip address <внутренний IP>
+        ip port <внутренний порт>
+       exit
+       ruleset <имя>
+        from zone untrusted
+        rule 1
+         match protocol tcp
+         match destination-address <внешний IP или object-group>
+         match destination-port <object-group service>
+         action destination-nat pool <имя пула>
+         enable
+        exit
+       exit
+      exit
+    explain: "Кроме NAT нужно правило в zone-pair untrusted → trusted, пропускающее трафик на внутренний адрес."
+    confidence: medium
+
+  - id: dhcp-server
+    title: DHCP-сервер для локальной сети
+    tags: [dhcp, сервер, server, адреса, пул]
+    mode: config
+    commands: |
+      ip dhcp-server
+      ip dhcp-server pool <имя>
+       network <сеть>/<префикс>
+       address-range <IP1>-<IP2>
+       default-router <IP шлюза>
+       dns-server <IP DNS>
+      exit
+    explain: "Для работы DHCP из зоны нужно разрешить в zone-pair <зона> self протокол UDP порты 67-68."
+    confidence: medium
+
+  - id: user-create
+    title: Создать пользователя
+    tags: [пользователь, user, username, пароль, password]
+    mode: config
+    commands: |
+      username <логин>
+       password <пароль>
+       privilege 15
+      exit
+    explain: "Пароль admin по умолчанию — «password». Смените его первым делом."
+    confidence: high
+
+  - id: ssh-enable
+    title: SSH-доступ к маршрутизатору
+    tags: [ssh, telnet, доступ, удалённый]
+    mode: config
+    commands: |
+      ip ssh server
+    explain: "Доступ к самому ESR регулируется парой zone-pair <зона> self: разрешите там TCP/22."
+    confidence: medium
+
+  - id: show-interfaces
+    title: Состояние интерфейсов
+    tags: [порты, интерфейсы, status, линк, состояние]
+    mode: exec
+    commands: |
+      show interfaces status
+      show interfaces description
+      show ip interfaces
+    confidence: high
+
+  - id: show-route
+    title: Таблица маршрутизации
+    tags: [маршрут, route, маршрутизация]
+    mode: exec
+    commands: |
+      show ip route
+    confidence: high
+
+  - id: show-nat
+    title: Проверить NAT и firewall
+    tags: [nat, firewall, сессии, трансляции, проверка]
+    mode: exec
+    commands: |
+      show ip nat translations
+      show ip firewall sessions
+      show security zone-pair configuration <откуда> <куда>
+    confidence: medium
+
+  - id: ntp
+    title: NTP и часовой пояс
+    tags: [ntp, время, time, clock, часовой]
+    mode: config
+    commands: |
+      clock timezone gmt +3
+      ntp enable
+      ntp server <IP>
+    confidence: medium
+
+  - id: syslog
+    title: Отправка логов на syslog-сервер
+    tags: [syslog, логи, logging, журнал]
+    mode: config
+    commands: |
+      syslog host <имя>
+       remote-address <IP>
+      exit
+    confidence: low
+
+  - id: ospf
+    title: OSPF
+    tags: [ospf, динамическая, маршрутизация]
+    mode: config
+    commands: |
+      router ospf 1
+       area 0.0.0.0
+        enable
+       exit
+       enable
+      exit
+      interface gigabitethernet 1/0/<N>
+       ip ospf instance 1
+       ip ospf area 0.0.0.0
+       ip ospf
+    confidence: medium
+
+  - id: firmware-update
+    title: Обновление прошивки
+    tags: [прошивка, обновление, firmware, update, upgrade, tftp]
+    mode: exec
+    commands: |
+      copy tftp://<IP>:/<файл> system:firmware
+      boot system image-2
+      show bootvar
+      reload system
+    explain: "Новый образ записывается в неактивный слот; проверьте «show bootvar», какой слот активен. Перед большим скачком версий читайте release notes: иногда нужно обновить загрузчик или идти через промежуточную версию."
+    confidence: medium
+
+  - id: backup-config
+    title: Резервная копия конфигурации
+    tags: [бэкап, backup, tftp, копия, резерв]
+    mode: exec
+    commands: |
+      copy running-config tftp://<IP>:/<файл>
+    confidence: medium
+
+  - id: ping-trace
+    title: Проверка связи
+    tags: [ping, пинг, traceroute, связь]
+    mode: exec
+    commands: |
+      ping <IP>
+      traceroute <IP>
+    confidence: high
+
+  - id: reload
+    title: Перезагрузка
+    tags: [reload, перезагрузка, reboot]
+    mode: exec
+    commands: |
+      reload system
+    confidence: high
+
+  - id: lldp-neighbors
+    title: Соседние устройства по LLDP
+    tags: [lldp, сосед, соседи, neighbors, топология, подключён]
+    mode: exec
+    commands: |
+      show lldp neighbors
+    explain: "LLDP на ESR по умолчанию выключен: «lldp enable» в режиме config, затем commit и confirm."
+    confidence: medium
+
+  - id: remote-connect
+    title: Подключиться с маршрутизатора к другому устройству
+    tags: [telnet, ssh, сосед, перейти, подключиться, зайти, другой, прыжок, jump]
+    mode: exec
+    commands: |
+      ping <IP>
+      ssh <IP> user <логин>
+      telnet <IP>
+    explain: "Точный синтаксис ssh-клиента зависит от версии ПО: посмотрите «ssh ?»."
+    confidence: low

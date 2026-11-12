@@ -1,0 +1,100 @@
+# Модели Eltex и их «семейства».
+# Семейство определяет синтаксис CLI, способ сохранения конфигурации
+# и тип устройства для SSH-автоматизации (netmiko).
+#
+# Чтобы добавить новую модель: допишите её в models, укажите family.
+# Если у модели свой CLI, заведите новое семейство в families и файл
+# kb/commands/<family>.yaml.
+
+families:
+  mes23xx:
+    title: "Коммутаторы MES23xx / MES33xx / MES53xx (CLI в стиле Cisco, порты 1/0/N)"
+    netmiko: eltex
+    port_format: "gigabitethernet 1/0/{n}"
+    save: "copy running-config startup-config"
+    save_prompt_answer: "Y"
+    paging_off: "terminal datadump"
+    config_enter: "configure"
+    default_login: "admin / admin"
+    notes:
+      - "Изменения применяются сразу, но после перезагрузки теряются, пока не сохранены в startup-config."
+      - "Автоматического отката нет: при работе удалённо меняйте порт управления осторожно."
+      - "Команда «write» есть не во всех версиях ПО; «copy running-config startup-config» работает везде."
+  mes24xx:
+    title: "Коммутаторы MES24xx (другой CLI, порты 0/N)"
+    netmiko: eltex
+    port_format: "gigabitethernet 0/{n}"
+    save: "write startup-config"
+    save_prompt_answer: null
+    paging_off: "terminal datadump"
+    config_enter: "configure terminal"
+    default_login: "admin / admin"
+    notes:
+      - "CLI MES24xx заметно отличается от MES23xx: другие имена портов, сохранение, часть show-команд."
+      - "Интерфейсы по умолчанию могут быть выключены: после настройки нужен «no shutdown»."
+      - "Синтаксис этого семейства в базе пока сверен хуже остальных: проверяйте подсказки через «?» на устройстве."
+  esr:
+    title: "Сервисные маршрутизаторы ESR (транзакционная конфигурация commit/confirm)"
+    netmiko: eltex_esr
+    port_format: "gigabitethernet 1/0/{n}"
+    save: "commit, затем confirm"
+    save_prompt_answer: null
+    paging_off: "terminal datadump"
+    config_enter: "configure"
+    default_login: "admin / password"
+    notes:
+      - "Изменения в режиме configure попадают в candidate-конфигурацию и ничего не меняют до «commit»."
+      - "После «commit» есть таймер (по умолчанию 600 с): если не ввести «confirm», конфигурация откатится. Это страховка при удалённой работе."
+      - "Межсетевой экран включён по умолчанию: интерфейс без security-zone не пропускает трафик, пока не задан «ip firewall disable» или зона."
+      - "В ПО до 1.4 часть синтаксиса object-group и NAT отличалась (ip address-range вместо ip prefix и т.п.)."
+
+models:
+  MES2308:
+    family: mes23xx
+    kind: switch
+    description: "Управляемый L2+ коммутатор доступа, 8 портов 1G + аплинки"
+  MES2308P:
+    family: mes23xx
+    kind: switch
+    description: "MES2308 с PoE"
+  MES2324:
+    family: mes23xx
+    kind: switch
+    description: "Управляемый L2+ коммутатор доступа, 24 порта 1G + 4 порта 10G SFP+ (tengigabitethernet 1/0/1-4)"
+  MES2324P:
+    family: mes23xx
+    kind: switch
+    description: "MES2324 с PoE"
+  MES2324B:
+    family: mes23xx
+    kind: switch
+    description: "Вариант MES2324"
+  MES2324F:
+    family: mes23xx
+    kind: switch
+    description: "Вариант MES2324 с оптическими портами"
+  MES2411X:
+    family: mes24xx
+    kind: switch
+    description: "Коммутатор серии MES24xx (семейство требует подтверждения по «show version»)"
+    unverified: true
+  MES2408:
+    family: mes24xx
+    kind: switch
+    description: "Коммутатор доступа серии MES24xx"
+  MES2428:
+    family: mes24xx
+    kind: switch
+    description: "Коммутатор доступа серии MES24xx"
+  ESR-12V:
+    family: esr
+    kind: router
+    description: "Сервисный маршрутизатор для малого офиса (WAN + LAN, есть исполнение с Wi-Fi ESR-12VF)"
+  ESR-15R:
+    family: esr
+    kind: router
+    description: "Сервисный маршрутизатор для малого офиса, исполнение для монтажа в стойку"
+  ESR-200:
+    family: esr
+    kind: router
+    description: "Сервисный маршрутизатор для филиалов"

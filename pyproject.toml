@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eltex-assistant"
+version = "0.2.0"
+description = "Помощник по коммутаторам и маршрутизаторам Eltex: команды, шаблоны, проверка конфигураций, SSH"
+requires-python = ">=3.9"
+dependencies = ["PyYAML>=6", "Jinja2>=3", "netmiko>=4.3", "pyserial>=3.4"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+eltex = "eltex_assistant.cli:main"
+
+[tool.setuptools]
+packages = ["eltex_assistant"]
+
+[tool.setuptools.package-data]
+eltex_assistant = ["gui.html", "kb/*.yaml", "kb/commands/*.yaml", "kb/templates/*.yaml"]

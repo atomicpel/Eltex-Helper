@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Помощник Eltex</title>
+<style>
+:root{
+  --bg:#f4f6f9; --panel:#ffffff; --ink:#1b2430; --muted:#66758a; --line:#dde3ec;
+  --accent:#0b6bcb; --accent-ink:#ffffff; --accent-soft:#e6f0fb;
+  --code-bg:#0f1b2a; --code-ink:#d9e6f5; --ok:#1a7f4b; --warn:#a15c00; --err:#c0322b;
+  --warn-soft:#fff4dc; --err-soft:#fde9e7; --ok-soft:#e3f5ea;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,"DejaVu Sans Mono",monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#111821; --panel:#1a232f; --ink:#e6ecf3; --muted:#93a1b5; --line:#2c3a4b;
+  --accent:#4ea1f0; --accent-ink:#06121f; --accent-soft:#1c3147;
+  --code-bg:#0b121b; --code-ink:#d9e6f5; --ok:#5fce91; --warn:#f0b455; --err:#f2857e;
+  --warn-soft:#3a2e15; --err-soft:#3d1f1d; --ok-soft:#173326;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Segoe UI",system-ui,-apple-system,"PT Sans",Roboto,sans-serif}
+.app{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
+nav{background:var(--panel);border-right:1px solid var(--line);padding:18px 12px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:4px}
+.brand{font-weight:700;font-size:17px;padding:4px 10px 14px}
+.brand small{display:block;color:var(--muted);font-weight:400;font-size:12px}
+nav button{all:unset;cursor:pointer;padding:9px 12px;border-radius:8px;color:var(--ink)}
+nav button:hover{background:var(--accent-soft)}
+nav button.on{background:var(--accent);color:var(--accent-ink);font-weight:600}
+nav button:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+nav .model{margin-top:auto;padding:10px;border-top:1px solid var(--line)}
+main{padding:26px 32px 60px;max-width:1100px;width:100%}
+h1{font-size:24px;margin:0 0 4px} h2{font-size:17px;margin:22px 0 8px}
+.lead{color:var(--muted);margin:0 0 18px;max-width:70ch}
+label{display:block;font-size:13px;color:var(--muted);margin-bottom:3px}
+input,select,textarea{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);font:inherit}
+textarea{font-family:var(--mono);font-size:13px;min-height:170px;resize:vertical;tab-size:1}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px}
+.row>div{flex:1 1 180px;min-width:0}
+.btn{cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:8px 14px;border-radius:8px;font:inherit;white-space:nowrap}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.btn.danger{background:var(--err);border-color:var(--err);color:#fff;font-weight:600}
+.btn.small{padding:3px 9px;font-size:13px}
+.btn:disabled{opacity:.5;cursor:default}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.card h3{margin:0 0 2px;font-size:16px}
+.meta{color:var(--muted);font-size:13px;margin-bottom:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.tag{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;background:var(--accent-soft);color:var(--ink)}
+.tag.warn{background:var(--warn-soft);color:var(--warn)} .tag.err{background:var(--err-soft);color:var(--err)} .tag.ok{background:var(--ok-soft);color:var(--ok)}
+pre{background:var(--code-bg);color:var(--code-ink);padding:12px 14px;border-radius:8px;overflow:auto;font:13px/1.45 var(--mono);margin:6px 0;white-space:pre;max-height:460px}
+.codewrap{position:relative}
+.codewrap .btn{position:absolute;top:6px;right:6px;background:#22344a;color:#d9e6f5;border-color:#33485f}
+.note{font-size:14px;margin:6px 0 0}
+.note b{font-weight:600}
+.issue{padding:8px 12px;border-radius:8px;margin-bottom:6px;font-size:14px}
+.issue.err{background:var(--err-soft)} .issue.warn{background:var(--warn-soft)} .issue.ok{background:var(--ok-soft)}
+.issue code{font-family:var(--mono);font-size:13px}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:13px}
+.tablewrap{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+.mono{font-family:var(--mono);font-size:13px}
+.bar{height:6px;background:var(--line);border-radius:9px;overflow:hidden;margin:10px 0}
+.bar i{display:block;height:100%;background:var(--accent);width:0;transition:width .2s}
+.hidden{display:none!important}
+.toast{position:fixed;right:20px;bottom:20px;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;max-width:420px;z-index:9}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.check{display:flex;gap:8px;align-items:center;font-size:14px;color:var(--ink)} .check input{width:auto}
+dialog{border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);max-width:640px;width:92vw;padding:20px}
+dialog::backdrop{background:rgba(0,0,0,.5)}
+@media (max-width:820px){.app{grid-template-columns:1fr}nav{position:static;height:auto;flex-direction:row;flex-wrap:wrap}nav .model{margin:0;border:0;flex:1 1 100%}main{padding:18px 16px}.split{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav>
+    <div class="brand">Помощник Eltex<small id="ver"></small></div>
+    <button data-tab="ref" class="on">Справочник команд</button>
+    <button data-tab="tpl">Шаблоны</button>
+    <button data-tab="chk">Проверка конфигурации</button>
+    <button data-tab="net">Сканирование сети</button>
+    <button data-tab="dev">Устройства</button>
+    <div class="model">
+      <label for="model">Модель</label>
+      <select id="model"></select>
+    </div>
+  </nav>
+  <main>
+    <section id="tab-ref">
+      <h1>Справочник команд</h1>
+      <p class="lead">Опишите задачу своими словами, например «настроить транк», «проброс порта» или «найти порт по MAC». Модель выбирается слева внизу.</p>
+      <div class="row"><div style="flex:4 1 300px"><input id="q" placeholder="Что нужно сделать?" autofocus></div></div>
+      <div id="famnotes"></div>
+      <div id="results"></div>
+    </section>
+
+    <section id="tab-tpl" class="hidden">
+      <h1>Шаблоны конфигураций</h1>
+      <p class="lead">Заполните параметры и получите готовую конфигурацию под выбранную модель.</p>
+      <div class="row"><div><label for="tplsel">Шаблон</label><select id="tplsel"></select></div></div>
+      <div id="tplform" class="card"></div>
+      <button class="btn primary" id="tplgo">Собрать конфигурацию</button>
+      <div id="tplout" class="hidden">
+        <h2>Результат</h2>
+        <div id="tplissues"></div>
+        <div class="codewrap"><pre id="tpltext"></pre><button class="btn small" data-copy="tpltext">Копировать</button></div>
+        <button class="btn" id="tplsend">Перенести в «Устройства» для отправки</button>
+      </div>
+    </section>
+
+    <section id="tab-chk" class="hidden">
+      <h1>Проверка конфигурации</h1>
+      <p class="lead">Вставьте конфигурацию или набор команд. Программа найдёт синтаксис чужой серии, неверный формат адресов и портов, слабые пароли.</p>
+      <textarea id="chktext" placeholder="configure&#10;interface gigabitethernet 1/0/1&#10; ..."></textarea>
+      <p><button class="btn primary" id="chkgo">Проверить</button></p>
+      <div id="chkissues"></div>
+    </section>
+
+    <section id="tab-net" class="hidden">
+      <h1>Сканирование сети</h1>
+      <p class="lead">Проверяются ping, порты SSH, Telnet, HTTP и HTTPS, SNMP и MAC-адреса. Сканируйте только свои сети.</p>
+      <div class="row">
+        <div style="flex:2 1 260px"><label for="scantargets">Подсеть или диапазон</label><input id="scantargets" placeholder="192.168.1.0/24 или 10.0.0.10-50"></div>
+        <div><label for="scancomm">SNMP community (через запятую)</label><input id="scancomm" value="public"></div>
+        <div style="flex:0 0 auto"><button class="btn primary" id="scango">Сканировать</button></div>
+      </div>
+      <div id="scanprog" class="hidden"><div class="bar"><i></i></div><span class="meta" id="scanprogtext"></span></div>
+      <div id="scanres"></div>
+    </section>
+
+    <section id="tab-dev" class="hidden">
+      <h1>Устройства</h1>
+      <p class="lead">Список устройств хранится в файле <span class="mono" id="invpath"></span>. Пароли в него не записываются.</p>
+      <div class="tablewrap"><table id="devtable"></table></div>
+      <p><button class="btn" id="devadd">Добавить устройство</button></p>
+
+      <div id="devwork" class="hidden">
+        <h2 id="devtitle"></h2>
+        <div class="row">
+          <div><label for="devpass">Пароль (не сохраняется)</label><input id="devpass" type="password" autocomplete="off"></div>
+          <div style="flex:3 1 300px" class="meta" id="devhint"></div>
+        </div>
+        <div class="split">
+          <div class="card">
+            <h3>Выполнить команды</h3>
+            <div class="meta" id="quick"></div>
+            <textarea id="cmds" style="min-height:110px" placeholder="show version"></textarea>
+            <p><button class="btn primary" id="rungo">Выполнить</button> <button class="btn" id="bakgo">Сделать бэкап</button></p>
+          </div>
+          <div class="card">
+            <h3>Применить конфигурацию</h3>
+            <textarea id="pushtext" style="min-height:110px" placeholder="Команды конфигурации"></textarea>
+            <label class="check"><input type="checkbox" id="pushsave" checked> <span id="pushsavelabel">Сохранить после применения</span></label>
+            <p><button class="btn danger" id="pushgo">Проверить и отправить…</button></p>
+          </div>
+        </div>
+        <div id="devout"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<dialog id="dlg"></dialog>
+<div id="toast" class="toast hidden" role="status"></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+function h(tag, attrs, ...kids){
+  const e = document.createElement(tag);
+  for (const [k,v] of Object.entries(attrs||{})){
+    if (k === "class") e.className = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids.flat()) if (k != null && k !== false) e.append(k.nodeType ? k : document.createTextNode(String(k)));
+  return e;
+}
+// токен приходит в адресе после # и в адресную строку больше не попадает
+let TOKEN = sessionStorage.getItem("t") || "";
+if (location.hash.startsWith("#t=")){ TOKEN = location.hash.slice(3); sessionStorage.setItem("t", TOKEN); history.replaceState(null, "", location.pathname); }
+
+async function api(path, body){
+  const opt = {headers:{"X-Token":TOKEN}};
+  if (body !== undefined){ opt.method = "POST"; opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body); }
+  let r;
+  try { r = await fetch(path, opt); } catch(e){ throw new Error("Программа не отвечает. Проверьте, что окно с командой eltex gui не закрыто."); }
+  const data = await r.json().catch(() => ({error:"Непонятный ответ программы"}));
+  if (!r.ok) throw new Error(data.error || "Ошибка");
+  return data;
+}
+async function job(id, onTick){
+  for(;;){
+    const j = await api("/api/job?id=" + id);
+    if (onTick) onTick(j);
+    if (j.done){ if (j.error) throw new Error(j.error); return j; }
+    await new Promise(r => setTimeout(r, 500));
+  }
+}
+let toastTimer;
+function toast(msg){ const t = $("toast"); t.textContent = msg; t.classList.remove("hidden"); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add("hidden"), 5000); }
+function copyText(text){
+  (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(() => toast("Скопировано"), () => {
+    const ta = h("textarea"); ta.value = text; document.body.append(ta); ta.select(); document.execCommand("copy"); ta.remove(); toast("Скопировано");
+  });
+}
+function codeBlock(text){ return h("div", {class:"codewrap"}, h("pre", {}, text), h("button", {class:"btn small", onclick:() => copyText(text)}, "Копировать")); }
+function busy(btn, on, label){ btn.disabled = on; if (on){ btn.dataset.l = btn.textContent; btn.textContent = label || "Подождите…"; } else if (btn.dataset.l) btn.textContent = btn.dataset.l; }
+
+let META = {families:{}, models:[], templates:[]};
+const model = () => $("model").value;
+const familyOf = name => (META.models.find(m => m.name === name) || {}).family || "";
+
+// ---------------------------------------------------------------- навигация
+document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab)));
+function showTab(name){
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
+  document.querySelectorAll("main section").forEach(s => s.classList.toggle("hidden", s.id !== "tab-" + name));
+}
+
+// ---------------------------------------------------------------- справочник
+const CONF = {high:null, medium:["warn","проверьте «?» на устройстве"], low:["err","черновик, синтаксис не подтверждён"]};
+function renderCommand(c){
+  const conf = CONF[c.confidence];
+  return h("div", {class:"card"},
+    h("h3", {}, c.title),
+    h("div", {class:"meta"}, h("span", {class:"tag"}, c.family), c.mode && ("режим: " + c.mode), conf && h("span", {class:"tag " + conf[0]}, conf[1])),
+    codeBlock(c.commands),
+    c.example && h("div", {}, h("div", {class:"meta"}, "Пример"), codeBlock(c.example)),
+    c.explain && h("p", {class:"note"}, c.explain),
+    c.firmware && h("p", {class:"note"}, h("b", {}, "Версии ПО: "), c.firmware));
+}
+let searchTimer;
+async function doSearch(){
+  const box = $("results");
+  try {
+    const r = await api("/api/search?q=" + encodeURIComponent($("q").value) + "&model=" + encodeURIComponent(model()));
+    box.replaceChildren(...(r.items.length ? r.items.map(renderCommand) : [h("p", {class:"lead"}, "Ничего не нашлось. Попробуйте другие слова: vlan, транк, nat, сохранить, ssh.")]));
+  } catch(e){ box.replaceChildren(h("div", {class:"issue err"}, e.message)); }
+  const fam = META.families[familyOf(model())];
+  $("famnotes").replaceChildren(...(fam ? [h("div", {class:"card"}, h("h3", {}, fam.title),
+    h("div", {class:"meta"}, "Сохранение: " + fam.save, " · Логин по умолчанию: " + fam.default_login),
+    h("ul", {style:"margin:4px 0 0;padding-left:20px"}, fam.notes.map(n => h("li", {class:"note"}, n))))] : []));
+}
+$("q").addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(doSearch, 250); });
+$("model").addEventListener("change", () => { doSearch(); renderTplForm(); });
+
+// ---------------------------------------------------------------- шаблоны
+function renderTplForm(){
+  const t = META.templates.find(x => x.name === $("tplsel").value); if (!t) return;
+  const fam = familyOf(model());
+  const ok = t.families.includes(fam);
+  $("tplgo").disabled = !ok;
+  const fields = Object.entries(t.params).map(([k, p]) => h("div", {},
+    h("label", {for:"p_" + k}, p.help + (p.required ? " *" : "")),
+    h("input", {id:"p_" + k, "data-param":k, type:p.secret ? "password" : "text", placeholder:p.default || "", autocomplete:"off"})));
+  $("tplform").replaceChildren(
+    !ok && h("div", {class:"issue warn"}, model() ? "Этот шаблон не подходит для выбранной модели. Он рассчитан на: " + t.families.join(", ") + "." : "Сначала выберите модель слева внизу."),
+    h("div", {class:"row"}, fields),
+    h("div", {class:"meta"}, "Поля со звёздочкой обязательны. В остальных пустое значение заменяется тем, что показано серым."));
+  $("tplout").classList.add("hidden");
+}
+function issuesView(issues){
+  if (!issues.length) return [h("div", {class:"issue ok"}, "Замечаний нет.")];
+  return issues.map(i => h("div", {class:"issue " + (i.level === "ошибка" ? "err" : "warn")},
+    h("b", {}, i.level === "ошибка" ? "Ошибка" : "Внимание"), i.line_no ? [" в строке " + i.line_no + ": ", h("code", {}, i.line)] : "", h("div", {}, i.message)));
+}
+$("tplsel").addEventListener("change", renderTplForm);
+$("tplgo").addEventListener("click", async () => {
+  const params = {}; document.querySelectorAll("[data-param]").forEach(i => params[i.dataset.param] = i.value);
+  try {
+    const r = await api("/api/render", {name:$("tplsel").value, model:model(), params});
+    $("tpltext").textContent = r.text; $("tplissues").replaceChildren(...issuesView(r.issues)); $("tplout").classList.remove("hidden");
+  } catch(e){ toast(e.message); }
+});
+document.querySelectorAll("[data-copy]").forEach(b => b.addEventListener("click", () => copyText($(b.dataset.copy).textContent)));
+$("tplsend").addEventListener("click", () => { $("pushtext").value = $("tpltext").textContent; showTab("dev"); toast("Конфигурация перенесена. Выберите устройство и нажмите «Проверить и отправить»."); });
+
+// ---------------------------------------------------------------- проверка
+$("chkgo").addEventListener("click", async () => {
+  try { const r = await api("/api/check", {text:$("chktext").value, model:model()}); $("chkissues").replaceChildren(...issuesView(r.issues)); }
+  catch(e){ $("chkissues").replaceChildren(h("div", {class:"issue err"}, e.message)); }
+});
+
+// ---------------------------------------------------------------- сканирование
+let lastHosts = [];
+$("scango").addEventListener("click", async () => {
+  const btn = $("scango"), prog = $("scanprog");
+  busy(btn, true, "Сканирую…"); $("scanres").replaceChildren(); prog.classList.remove("hidden");
+  try {
+    const r = await api("/api/scan", {targets:$("scantargets").value, communities:$("scancomm").value});
+    const j = await job(r.job, s => { if (s.progress){ prog.querySelector("i").style.width = (100 * s.progress[0] / s.progress[1]) + "%"; $("scanprogtext").textContent = "Проверено " + s.progress[0] + " из " + s.progress[1]; } });
+    lastHosts = j.result.hosts; renderHosts();
+  } catch(e){ $("scanres").replaceChildren(h("div", {class:"issue err"}, e.message)); }
+  prog.classList.add("hidden"); busy(btn, false);
+});
+function renderHosts(){
+  if (!lastHosts.length){ $("scanres").replaceChildren(h("p", {class:"lead"}, "Никто не ответил.")); return; }
+  const eltex = lastHosts.filter(x => x.family);
+  const rows = lastHosts.map(x => {
+    const open = Object.entries(x.ports).filter(([,v]) => v).map(([k]) => k); if (Object.keys(x.snmp).length) open.push("snmp");
+    const info = x.name || x.snmp.sysDescr || x.http_title || x.telnet_banner || x.ssh_banner || "";
+    return h("tr", {}, h("td", {class:"mono"}, x.ip), h("td", {class:"mono"}, x.mac), h("td", {}, x.ping ? "да" : "нет"), h("td", {}, open.join(", ")),
+      h("td", {}, x.vendor && h("span", {class:"tag ok"}, x.vendor)), h("td", {}, x.model), h("td", {}, info.slice(0, 80)),
+      h("td", {}, x.family && h("button", {class:"btn small", onclick:() => addFromScan([x])}, "В устройства")));
+  });
+  $("scanres").replaceChildren(
+    h("p", {}, "Ответило адресов: " + lastHosts.length + ", из них распознано Eltex с известной моделью: " + eltex.length + ". ",
+      eltex.length > 1 && h("button", {class:"btn small", onclick:() => addFromScan(eltex)}, "Добавить все в устройства")),
+    h("div", {class:"tablewrap"}, h("table", {}, h("tr", {}, ["IP","MAC","Ping","Открыто","Производитель","Модель","Имя или описание",""].map(t => h("th", {}, t))), rows)));
+}
+async function addFromScan(hosts){
+  for (const x of hosts){
+    if (DEVICES.some(d => d.host === x.ip)) continue;
+    const name = (x.name || (x.model + "-" + x.ip)).replace(/[^\w.-]/g, "-");
+    DEVICES.push({name, host:x.ip, model:x.model, username:"admin", transport:(!x.ports.ssh && x.ports.telnet) ? "telnet" : "ssh"});
+  }
+  await saveDevices(); toast("Добавлено. Список на вкладке «Устройства».");
+}
+
+// ---------------------------------------------------------------- устройства
+let DEVICES = [], CURRENT = null;
+const TRANSPORT = {ssh:"SSH", telnet:"Telnet", serial:"Консольный порт"};
+async function loadDevices(){ const r = await api("/api/inventory"); DEVICES = r.devices; $("invpath").textContent = r.path; renderDevices(); }
+async function saveDevices(){ try { const r = await api("/api/inventory", {devices:DEVICES}); DEVICES = r.devices; renderDevices(); } catch(e){ toast(e.message); await loadDevices(); } }
+function renderDevices(){
+  const rows = DEVICES.map((d, i) => h("tr", {},
+    h("td", {}, h("b", {}, d.name)), h("td", {}, d.model), h("td", {}, TRANSPORT[d.transport || "ssh"]),
+    h("td", {class:"mono"}, d.transport === "serial" ? d.serial_port : d.host), h("td", {}, d.username || "admin"),
+    h("td", {}, h("button", {class:"btn small primary", onclick:() => selectDevice(d)}, "Работать"), " ",
+      h("button", {class:"btn small", onclick:() => editDevice(i)}, "Изменить"), " ",
+      h("button", {class:"btn small", onclick:() => { if (confirm("Удалить «" + d.name + "» из списка?")){ DEVICES.splice(i, 1); saveDevices(); } }}, "Удалить"))));
+  $("devtable").replaceChildren(h("tr", {}, ["Имя","Модель","Подключение","Адрес или порт","Логин",""].map(t => h("th", {}, t))),
+    ...(rows.length ? rows : [h("tr", {}, h("td", {colspan:6, class:"meta"}, "Пока пусто. Добавьте устройство вручную или найдите его на вкладке «Сканирование сети»."))]));
+}
+async function editDevice(index){
+  const d = index == null ? {transport:"ssh", username:"admin", model:model()} : {...DEVICES[index]};
+  let ports = []; try { ports = (await api("/api/ports")).ports; } catch(e){}
+  const f = {
+    name:h("input", {value:d.name || "", required:true}),
+    model:h("select", {}, META.models.map(m => h("option", {value:m.name, selected:m.name === d.model}, m.name))),
+    transport:h("select", {}, Object.entries(TRANSPORT).map(([k, v]) => h("option", {value:k, selected:k === (d.transport || "ssh")}, v))),
+    host:h("input", {value:d.host || "", placeholder:"192.168.1.10"}),
+    serial_port:h("input", {value:d.serial_port || "", placeholder:"COM3 или /dev/ttyUSB0", list:"portlist"}),
+    username:h("input", {value:d.username || "admin"}),
+  };
+  const hostRow = h("div", {}, h("label", {}, "IP-адрес"), f.host), serRow = h("div", {}, h("label", {}, "Консольный порт (115200 8N1)"), f.serial_port,
+    h("datalist", {id:"portlist"}, ports.map(p => h("option", {value:p.device}, p.description))));
+  const sync = () => { const s = f.transport.value === "serial"; hostRow.classList.toggle("hidden", s); serRow.classList.toggle("hidden", !s); };
+  f.transport.addEventListener("change", sync); sync();
+  const dlg = $("dlg");
+  dlg.replaceChildren(h("form", {method:"dialog", onsubmit:async ev => {
+      ev.preventDefault();
+      const nd = {name:f.name.value.trim(), model:f.model.value, transport:f.transport.value, username:f.username.value.trim() || "admin"};
+      if (nd.transport === "serial") nd.serial_port = f.serial_port.value.trim(); else nd.host = f.host.value.trim();
+      if (!nd.name || !(nd.host || nd.serial_port)){ toast("Заполните имя и адрес или порт."); return; }
+      if (index == null) DEVICES.push(nd); else DEVICES[index] = nd;
+      dlg.close(); await saveDevices();
+    }},
+    h("h2", {style:"margin-top:0"}, index == null ? "Новое устройство" : "Изменить устройство"),
+    h("div", {class:"row"}, h("div", {}, h("label", {}, "Имя"), f.name), h("div", {}, h("label", {}, "Модель"), f.model)),
+    h("div", {class:"row"}, h("div", {}, h("label", {}, "Подключение"), f.transport), hostRow, serRow, h("div", {}, h("label", {}, "Логин"), f.username)),
+    h("p", {style:"text-align:right;margin-bottom:0"}, h("button", {class:"btn", type:"button", onclick:() => dlg.close()}, "Отмена"), " ", h("button", {class:"btn primary"}, "Сохранить"))));
+  dlg.showModal();
+}
+$("devadd").addEventListener("click", () => editDevice(null));
+function selectDevice(d){
+  CURRENT = d; $("devwork").classList.remove("hidden"); $("devout").replaceChildren(); $("devpass").value = "";
+  const fam = META.families[familyOf(d.model)] || {};
+  $("devtitle").textContent = d.name + " · " + d.model + " · " + TRANSPORT[d.transport || "ssh"] + " " + (d.transport === "serial" ? d.serial_port : d.host);
+  $("devhint").textContent = "Логин: " + (d.username || "admin") + ". " + (familyOf(d.model) === "esr"
+    ? "На ESR после отправки выполняется commit, затем проверяется доступ и только потом confirm. Если доступ пропал, маршрутизатор сам откатит изменения."
+    : "На коммутаторах MES отката нет: команды применяются сразу. Сохранение: " + (fam.save || "") + ".");
+  $("pushsavelabel").textContent = familyOf(d.model) === "esr" ? "Подтвердить (confirm) после проверки доступа" : "Сохранить в startup-config после применения";
+  const quick = ["show version", "show running-config", "show interfaces status", "show lldp neighbors"];
+  $("quick").replaceChildren(...quick.map(c => h("button", {class:"btn small", onclick:() => { $("cmds").value = ($("cmds").value.trim() ? $("cmds").value.trim() + "\n" : "") + c; }}, c)));
+  $("devwork").scrollIntoView({behavior:"smooth"});
+}
+const target = () => ({...CURRENT, password:$("devpass").value});
+function outCard(title, ...kids){ const c = h("div", {class:"card"}, h("h3", {}, title), ...kids); $("devout").prepend(c); return c; }
+async function devOp(btn, title, path, body, show){
+  if (!CURRENT) return;
+  busy(btn, true, "Выполняю…");
+  const log = h("div", {class:"note"}); const card = outCard(title + " · " + CURRENT.name, log);
+  try {
+    const r = await api(path, body);
+    const j = await job(r.job, s => { log.replaceChildren(...s.log.map(l => h("div", {}, l))); });
+    show(card, j.result);
+  } catch(e){ card.append(h("div", {class:"issue err"}, e.message)); }
+  busy(btn, false);
+}
+$("rungo").addEventListener("click", ev => devOp(ev.target, "Команды", "/api/run", {target:target(), commands:$("cmds").value}, (c, r) => c.append(codeBlock(r.output))));
+$("bakgo").addEventListener("click", ev => devOp(ev.target, "Бэкап", "/api/backup", {target:target()}, (c, r) => {
+  c.append(h("div", {class:"issue ok"}, "Сохранено в " + r.path), r.diff ? h("div", {}, h("div", {class:"meta"}, "Изменения с прошлого бэкапа"), codeBlock(r.diff)) : h("div", {class:"meta"}, "Отличий от прошлого бэкапа нет или это первый бэкап."), codeBlock(r.config));
+}));
+$("pushgo").addEventListener("click", async ev => {
+  if (!CURRENT){ return; }
+  const text = $("pushtext").value; let issues;
+  try { issues = (await api("/api/check", {text, model:CURRENT.model})).issues; } catch(e){ toast(e.message); return; }
+  const hasErr = issues.some(i => i.level === "ошибка"); const dlg = $("dlg"); const btn = ev.target;
+  dlg.replaceChildren(
+    h("h2", {style:"margin-top:0"}, "Отправить на " + CURRENT.name + "?"),
+    h("p", {class:"note"}, CURRENT.model + " · " + (CURRENT.transport === "serial" ? CURRENT.serial_port : CURRENT.host)),
+    ...issuesView(issues), h("pre", {style:"max-height:240px"}, text),
+    h("p", {style:"text-align:right;margin-bottom:0"}, h("button", {class:"btn", onclick:() => dlg.close()}, "Отмена"), " ",
+      h("button", {class:"btn danger", disabled:hasErr || !text.trim(), onclick:() => { dlg.close();
+        devOp(btn, "Применение конфигурации", "/api/push", {target:target(), text, save:$("pushsave").checked, confirm:true}, (c, r) => c.append(h("div", {class:"issue ok"}, "Готово."), codeBlock(r.output))); }}, "Отправить")));
+  dlg.showModal();
+});
+
+// ---------------------------------------------------------------- запуск
+(async () => {
+  try {
+    META = await api("/api/meta");
+    $("ver").textContent = "версия " + META.version;
+    $("model").replaceChildren(h("option", {value:""}, "Все модели"), ...META.models.map(m => h("option", {value:m.name}, m.name + (m.unverified ? " (?)" : ""))));
+    $("tplsel").replaceChildren(...META.templates.map(t => h("option", {value:t.name}, t.title)));
+    renderTplForm(); doSearch(); loadDevices();
+  } catch(e){ document.querySelector("main").replaceChildren(h("div", {class:"issue err"}, e.message)); }
+})();
+</script>
+</body>
+</html>
