@@ -30,6 +30,7 @@ def check(text: str, family: str) -> list[Issue]:
     has_commit = False
     has_confirm = False
     styles: set[str] = set()
+    esr_match: set[str] = set()
     for i, raw in enumerate(lines, 1):
         line = raw.rstrip()
         s = line.strip().lower()
@@ -53,6 +54,13 @@ def check(text: str, family: str) -> list[Issue]:
                 add("внимание", "switchport на ESR есть только на части моделей с коммутаторными портами; обычно используют bridge/сабинтерфейсы.")
             if s.startswith("ip route ") and re.match(r"ip route \d+\.\d+\.\d+\.\d+ \d+\.\d+\.\d+\.\d+", s):
                 add("ошибка", "На ESR маршрут пишется как «ip route 0.0.0.0/0 <шлюз>».")
+            m = re.match(r"match (?:not )?(source|destination)-(address|port) (\S+)", s)
+            if m:
+                esr_match.add("new" if m.group(3) in ("object-group", "prefix", "address-range", "port-range", "any")
+                              else "old")
+            if s.startswith("copy running-config "):
+                add("ошибка", "На ESR источник называется «system:running-config»: "
+                              "«copy system:running-config tftp://<IP>:/<файл>».")
             if s == "commit":
                 has_commit = True
             if s == "confirm":
@@ -71,6 +79,8 @@ def check(text: str, family: str) -> list[Issue]:
                 add("внимание", "На MES23xx VLAN создаются внутри «vlan database».")
             if _PORT_2.search(line) and not _PORT_3.search(line):
                 add("ошибка", "Порты MES23xx называются 1/0/N (например gigabitethernet 1/0/1).")
+            if re.match(r"storm-control \w+ enable\b", s):
+                add("ошибка", "На MES23xx шторм-контроль включается порогом: «storm-control broadcast level 5».")
             if s.startswith("security zone") or s.startswith("nat source"):
                 add("ошибка", "Это команда ESR, на коммутаторе MES её нет.")
 
@@ -120,6 +130,12 @@ def check(text: str, family: str) -> list[Issue]:
     elif family == "mes24xx" and styles == {"0/N"}:
         issues.append(Issue(0, "", "внимание", "Порты названы в формате 0/N: он действует на ПО 10.3.x и старше. "
                                                "На ПО 10.4.x порты называются 1/0/N."))
+    if family == "esr" and len(esr_match) == 2:
+        issues.append(Issue(0, "", "ошибка", "В правилах смешаны две записи: с «object-group» (ПО 1.23 и новее) и просто с именем "
+                                             "группы (ПО 1.20 и старше). Маршрутизатор примет только одну из них."))
+    elif family == "esr" and esr_match == {"old"}:
+        issues.append(Issue(0, "", "внимание", "Правила записаны для ПО 1.20 и старше («match source-address LAN»). На ПО 1.23 "
+                                               "и новее нужно «match source-address object-group network LAN»."))
     if family == "esr" and has_commit and not has_confirm:
         issues.append(Issue(0, "", "внимание", "Есть commit, но нет confirm: через таймаут конфигурация откатится."))
     return issues

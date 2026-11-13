@@ -13,10 +13,11 @@ params:
   dhcp_start: {help: "Начало пула DHCP", default: "192.168.1.100"}
   dhcp_end: {help: "Конец пула DHCP", default: "192.168.1.200"}
   dns: {help: "DNS для клиентов", default: "8.8.8.8"}
+  fw: {help: "Версия ПО: new = 1.23 и новее, old = 1.20 и старше (отличается запись правил)", default: "new"}
   admin_password: {help: "Новый пароль admin", required: true, secret: true}
 bodies:
   esr: |
-    configure
+    {% set og_port = "" if fw == "old" else "object-group " %}{% set og_net = "" if fw == "old" else "object-group network " %}configure
     hostname {{ hostname }}
     username admin
      password {{ admin_password }}
@@ -64,13 +65,13 @@ bodies:
      rule 10
       action permit
       match protocol tcp
-      match destination-port SSH
+      match destination-port {{ og_port }}SSH
       enable
      exit
      rule 20
       action permit
       match protocol udp
-      match destination-port DHCP_SERVER
+      match destination-port {{ og_port }}DHCP_SERVER
       enable
      exit
      rule 30
@@ -83,7 +84,7 @@ bodies:
      rule 1
       action permit
       match protocol udp
-      match destination-port DHCP_CLIENT
+      match destination-port {{ og_port }}DHCP_CLIENT
       enable
      exit
     exit
@@ -91,7 +92,7 @@ bodies:
      ruleset INTERNET
       to interface {{ wan_if }}
       rule 1
-       match source-address LAN
+       match source-address {{ og_net }}LAN
        action source-nat interface
        enable
       exit

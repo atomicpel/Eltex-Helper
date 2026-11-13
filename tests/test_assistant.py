@@ -121,6 +121,30 @@ def test_mes2408b_reference_matches_manual():
     assert "allowed vlan" not in text("port-trunk") or "general" in text("port-trunk")
 
 
+def test_esr_rules_syntax_by_firmware():
+    """ПО 1.23+: «match … object-group …»; ПО 1.20 и старше: просто имя группы (справочник CLI 1.20 и 1.23)."""
+    new = templates.render("esr-office", "esr", {"admin_password": "x"})
+    assert "match source-address object-group network LAN" in new
+    assert "match destination-port object-group SSH" in new
+    assert not checker.check(new, "esr")
+    old = templates.render("esr-office", "esr", {"admin_password": "x", "fw": "old"})
+    assert "match source-address LAN" in old and "object-group network LAN\n" in old
+    assert [i.level for i in checker.check(old, "esr")] == ["внимание"]
+    mixed = "match source-address LAN\nmatch destination-port object-group SSH"
+    assert "ошибка" in [i.level for i in checker.check(mixed, "esr")]
+    assert checker.check("copy running-config tftp://10.0.0.1:/a.cfg", "esr")
+
+
+def test_reference_matches_manuals_mes23xx_esr():
+    get = lambda cid, fam: str(knowledge.get_command(cid, fam).commands)  # noqa: E731
+    assert "storm-control broadcast level" in get("storm-control", "mes23xx")
+    assert "enable" not in get("storm-control", "mes23xx")
+    assert checker.check("storm-control broadcast enable", "mes23xx")
+    assert "ssh <логин> <IP>" in get("remote-connect", "esr")
+    assert "copy system:running-config" in get("backup-config", "esr")
+    assert not [c.id for f in ("mes23xx", "esr") for c in knowledge.commands(f) if c.confidence == "low"]
+
+
 def test_prepare_lines():
     assert automation.prepare_lines("configure\n! c\n\nhostname X\nend\n") == ["hostname X"]
 

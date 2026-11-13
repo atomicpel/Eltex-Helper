@@ -38,7 +38,7 @@ commands:
     commands: |
       copy running-config startup-config
     explain: "Коммутатор спросит «Overwrite file [startup-config] ?» — ответьте Y. Без сохранения настройки пропадут после перезагрузки."
-    firmware: "В новых версиях ПО работает короткая команда «write»; в старых только copy."
+    firmware: "Короткая форма «write» (или «write memory») есть в ПО 4.0.18.4 и новее; на более старом ПО используйте copy."
     confidence: high
 
   - id: hostname
@@ -161,7 +161,7 @@ commands:
        switchport general pvid <ID>
       exit
     explain: "Удобно для IP-телефона с ПК за ним: данные без тега, голос с тегом."
-    confidence: medium
+    confidence: high
 
   - id: interface-range
     title: Настроить сразу несколько портов
@@ -225,8 +225,8 @@ commands:
       interface gigabitethernet 1/0/<N>
        spanning-tree portfast
        spanning-tree bpduguard enable
-    explain: "portfast и bpduguard ставьте только на абонентские порты, не на аплинки."
-    confidence: medium
+    explain: "Режимы: stp, rstp (по умолчанию), mstp, pvst, rapid-pvst. portfast и bpduguard ставьте только на абонентские порты, не на аплинки."
+    confidence: high
 
   - id: loopback-detection
     title: Обнаружение петель (loopback-detection)
@@ -236,7 +236,8 @@ commands:
       loopback-detection enable
       interface gigabitethernet 1/0/<N>
        loopback-detection enable
-    confidence: medium
+    explain: "Включается и глобально, и на каждом порту. Интервал отправки: «loopback-detection interval <сек>»."
+    confidence: high
 
   - id: lag
     title: Агрегация каналов (LACP, port-channel)
@@ -249,8 +250,8 @@ commands:
       interface port-channel <номер>
        switchport mode trunk
        switchport trunk allowed vlan add <список>
-    explain: "mode auto = LACP; mode on = статическая агрегация без LACP. Настройки VLAN задаются на port-channel, а не на физических портах."
-    confidence: medium
+    explain: "mode auto = LACP; mode on = статическая агрегация без LACP. Настройки VLAN задаются на port-channel, а не на физических портах. Проверка: «show interfaces channel-group»."
+    confidence: high
 
   - id: dhcp-snooping
     title: DHCP snooping (защита от чужих DHCP-серверов)
@@ -261,8 +262,8 @@ commands:
       ip dhcp snooping vlan <ID>
       interface <аплинк>
        ip dhcp snooping trust
-    explain: "Trust ставьте на порт, откуда приходит настоящий DHCP-сервер (обычно аплинк). Иначе клиенты не получат адреса."
-    confidence: medium
+    explain: "Trust ставьте на порт, откуда приходит настоящий DHCP-сервер (обычно аплинк). Иначе клиенты не получат адреса. Таблица: «show ip dhcp snooping binding»."
+    confidence: high
 
   - id: ntp
     title: Синхронизация времени (SNTP) и часовой пояс
@@ -278,7 +279,7 @@ commands:
       clock source sntp
       sntp unicast client enable
       sntp server 10.0.0.1
-    confidence: medium
+    confidence: high
 
   - id: syslog
     title: Отправка логов на syslog-сервер
@@ -296,16 +297,22 @@ commands:
       snmp-server server
       snmp-server community <community> ro
     explain: "Не используйте community public/private. Для доступа только с сервера мониторинга можно указать адрес: «snmp-server community <c> ro <IP>»."
-    confidence: medium
+    confidence: high
 
   - id: storm-control
     title: Ограничение широковещательного шторма
     tags: [storm, шторм, broadcast, multicast]
     mode: interface
     commands: |
-      storm-control broadcast enable
-      storm-control broadcast level <процент>
-    confidence: low
+      storm-control broadcast level <процент 1-100> [trap] [shutdown]
+      storm-control broadcast kbps <кбит/с> [trap] [shutdown]
+      storm-control multicast level <процент>
+      storm-control unicast level <процент>
+    example: |
+      interface gigabitethernet 1/0/5
+       storm-control broadcast level 5 trap
+    explain: "Отдельной команды «enable» нет: контроль включается самим указанием порога. trap пишет в журнал, shutdown выключает порт при превышении."
+    confidence: high
 
   - id: port-security
     title: Ограничение числа MAC на порту
@@ -314,8 +321,14 @@ commands:
     commands: |
       port security max <N>
       port security mode max-addresses
-      port security
-    confidence: low
+      port security discard trap <секунды>
+    example: |
+      interface gigabitethernet 1/0/5
+       port security max 2
+       port security mode max-addresses
+       port security discard trap 60
+    explain: "Режимы: max-addresses (учить не больше N адресов), lock (заморозить текущие адреса, режим по умолчанию), secure permanent. Действие при чужом MAC: forward, discard, discard-shutdown. Команда «port security» без параметров равна «port security discard»."
+    confidence: high
 
   - id: firmware-update
     title: Обновление прошивки
@@ -325,8 +338,9 @@ commands:
       boot system tftp://<IP>/<файл.ros>
       show bootvar
       reload
-    explain: "Файл загружается в неактивный образ, после «reload» коммутатор стартует с него. Сохраните конфигурацию до перезагрузки. При переходе через несколько мажорных версий читайте release notes: иногда нужен промежуточный образ или обновление загрузчика."
-    confidence: medium
+      boot system inactive-image
+    explain: "Файл загружается в неактивную область памяти, новая версия станет активной после «reload». Сохраните конфигурацию до перезагрузки. «boot system inactive-image» выбирает для следующей загрузки второй образ (так можно вернуться на прежнюю версию). При переходе через несколько мажорных версий читайте release notes: иногда нужен промежуточный образ или обновление загрузчика."
+    confidence: high
 
   - id: backup-config
     title: Резервная копия конфигурации на TFTP
@@ -351,7 +365,10 @@ commands:
     mode: exec
     commands: |
       reload
-    explain: "Перед перезагрузкой сохраните конфигурацию, иначе несохранённые изменения пропадут."
+      reload in <минуты>
+      reload at <чч:мм>
+      reload cancel
+    explain: "Перед перезагрузкой сохраните конфигурацию, иначе несохранённые изменения пропадут. Отложенная перезагрузка полезна как страховка при удалённой настройке: если доступ пропал, коммутатор вернётся к сохранённой конфигурации."
     confidence: high
 
   - id: lldp-neighbors
@@ -362,7 +379,7 @@ commands:
       show lldp neighbors
       show lldp neighbors gigabitethernet 1/0/<N>
     explain: "В подробном выводе по порту есть имя соседа, его порт и Management Address — адрес, по которому к нему можно подключиться. Если список пуст, включите LLDP на обоих устройствах: «lldp run» в режиме config."
-    confidence: medium
+    confidence: high
 
   - id: remote-connect
     title: Подключиться с этого коммутатора к соседнему
@@ -373,5 +390,5 @@ commands:
       ping <IP соседа>
       telnet <IP соседа>
       ssh <IP соседа>
-    explain: "Сначала узнайте адрес соседа по LLDP, проверьте его пингом, затем подключайтесь. Пинг пройдёт, только если VLAN управления разрешён в транке на обоих концах и у обоих коммутаторов есть адреса в этом VLAN. Команда ssh-клиента есть не во всех версиях ПО, telnet-клиент есть везде (на соседе должен быть включён telnet-сервер). Выход обратно: exit."
-    confidence: medium
+    explain: "Сначала узнайте адрес соседа по LLDP, проверьте его пингом, затем подключайтесь. Пинг пройдёт, только если VLAN управления разрешён в транке на обоих концах и у обоих коммутаторов есть адреса в этом VLAN. Клиент ssh есть в ПО 4.0.18.4 и новее; на более старом ПО используйте telnet (на соседе должен быть включён telnet-сервер). Выход обратно: exit."
+    confidence: high

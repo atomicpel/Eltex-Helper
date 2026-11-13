@@ -122,7 +122,7 @@ commands:
        rule <номер>
         action permit
         match protocol <tcp|udp|icmp|any>
-        match destination-port <object-group service>
+        match destination-port object-group <имя группы портов>
         enable
        exit
       exit
@@ -140,6 +140,7 @@ commands:
        exit
       exit
     explain: "Зона «self» — сам маршрутизатор. Чтобы зайти на ESR по SSH из зоны, нужна пара <зона> self с разрешающим правилом. Не забывайте «enable» в правиле."
+    firmware: "ПО 1.23 и новее: «match source-address object-group network <имя>», «match destination-port object-group <имя>» (можно и без групп: prefix <сеть/префикс>, port-range <порт>). ПО 1.20 и старше: просто имя группы, например «match source-address LAN», «match destination-port SSH»."
     confidence: high
 
   - id: firewall-disable
@@ -163,8 +164,7 @@ commands:
       object-group service <имя>
        port-range <порт>[-<порт>]
       exit
-    firmware: "В ранних версиях ПО (до ~1.4) «ip prefix» отсутствовал, использовался только «ip address-range»."
-    confidence: medium
+    confidence: high
 
   - id: nat-source
     title: NAT для выхода в интернет (source NAT / маскарадинг)
@@ -178,13 +178,14 @@ commands:
        ruleset <имя>
         to interface <WAN-интерфейс>
         rule 1
-         match source-address LAN
+         match source-address object-group network LAN
          action source-nat interface
          enable
         exit
        exit
       exit
     explain: "Нужен ещё маршрут по умолчанию и разрешающее правило зона LAN → зона WAN."
+    firmware: "ПО 1.23 и новее: «match source-address object-group network <имя>», «match destination-port object-group <имя>» (можно и без групп: prefix <сеть/префикс>, port-range <порт>). ПО 1.20 и старше: просто имя группы, например «match source-address LAN», «match destination-port SSH»."
     confidence: high
 
   - id: nat-dnat
@@ -204,15 +205,16 @@ commands:
         from zone untrusted
         rule 1
          match protocol tcp
-         match destination-address <внешний IP или object-group>
-         match destination-port <object-group service>
+         match destination-address address-range <внешний IP>
+         match destination-port object-group <имя группы портов>
          action destination-nat pool <имя пула>
          enable
         exit
        exit
       exit
     explain: "Кроме NAT нужно правило в zone-pair untrusted → trusted, пропускающее трафик на внутренний адрес."
-    confidence: medium
+    firmware: "ПО 1.23 и новее: «match source-address object-group network <имя>», «match destination-port object-group <имя>» (можно и без групп: prefix <сеть/префикс>, port-range <порт>). ПО 1.20 и старше: просто имя группы, например «match source-address LAN», «match destination-port SSH»."
+    confidence: high
 
   - id: dhcp-server
     title: DHCP-сервер для локальной сети
@@ -227,7 +229,7 @@ commands:
        dns-server <IP DNS>
       exit
     explain: "Для работы DHCP из зоны нужно разрешить в zone-pair <зона> self протокол UDP порты 67-68."
-    confidence: medium
+    confidence: high
 
   - id: user-create
     title: Создать пользователя
@@ -247,8 +249,9 @@ commands:
     mode: config
     commands: |
       ip ssh server
+      no ip telnet server
     explain: "Доступ к самому ESR регулируется парой zone-pair <зона> self: разрешите там TCP/22."
-    confidence: medium
+    confidence: high
 
   - id: show-interfaces
     title: Состояние интерфейсов
@@ -276,7 +279,7 @@ commands:
       show ip nat translations
       show ip firewall sessions
       show security zone-pair configuration <откуда> <куда>
-    confidence: medium
+    confidence: high
 
   - id: ntp
     title: NTP и часовой пояс
@@ -286,7 +289,9 @@ commands:
       clock timezone gmt +3
       ntp enable
       ntp server <IP>
-    confidence: medium
+      exit
+    explain: "Часовой пояс задаётся как «gmt» и сдвиг от -12 до +12. «ntp server» открывает режим настройки сервера, из него выходят командой exit."
+    confidence: high
 
   - id: syslog
     title: Отправка логов на syslog-сервер
@@ -295,8 +300,16 @@ commands:
     commands: |
       syslog host <имя>
        remote-address <IP>
+       severity <уровень>
+       transport <tcp|udp>
       exit
-    confidence: low
+    example: |
+      syslog host LOGSRV
+       remote-address 10.0.0.9
+       severity info
+      exit
+    explain: "<имя> служит только названием записи, адрес сервера задаёт remote-address."
+    confidence: high
 
   - id: ospf
     title: OSPF
@@ -321,19 +334,21 @@ commands:
     mode: exec
     commands: |
       copy tftp://<IP>:/<файл> system:firmware
-      boot system image-2
       show bootvar
+      boot system <image-1|image-2>
       reload system
-    explain: "Новый образ записывается в неактивный слот; проверьте «show bootvar», какой слот активен. Перед большим скачком версий читайте release notes: иногда нужно обновить загрузчик или идти через промежуточную версию."
-    confidence: medium
+    explain: "Новый образ записывается в неактивный слот. По «show bootvar» посмотрите, в какой слот он попал, и выберите его командой «boot system image-1» или «boot system image-2» (в новых версиях ПО можно «boot system inactive»). Не выключайте питание, пока команда boot system не завершилась. Перед большим скачком версий читайте release notes: иногда нужно обновить загрузчик или идти через промежуточную версию."
+    confidence: high
 
   - id: backup-config
     title: Резервная копия конфигурации
     tags: [бэкап, backup, tftp, копия, резерв]
     mode: exec
     commands: |
-      copy running-config tftp://<IP>:/<файл>
-    confidence: medium
+      copy system:running-config tftp://<IP>:/<файл>
+      copy tftp://<IP>:/<файл> system:candidate-config
+    explain: "Вторая команда загружает конфигурацию с сервера в candidate; она начнёт действовать после commit и confirm."
+    confidence: high
 
   - id: ping-trace
     title: Проверка связи
@@ -359,7 +374,7 @@ commands:
     commands: |
       show lldp neighbors
     explain: "LLDP на ESR по умолчанию выключен: «lldp enable» в режиме config, затем commit и confirm."
-    confidence: medium
+    confidence: high
 
   - id: remote-connect
     title: Подключиться с маршрутизатора к другому устройству
@@ -367,7 +382,7 @@ commands:
     mode: exec
     commands: |
       ping <IP>
-      ssh <IP> user <логин>
+      ssh <логин> <IP>
       telnet <IP>
-    explain: "Точный синтаксис ssh-клиента зависит от версии ПО: посмотрите «ssh ?»."
-    confidence: low
+    explain: "В ssh-клиенте ESR сначала пишется логин, потом адрес. Другой порт: «ssh <логин> <IP> port <порт>»."
+    confidence: high
