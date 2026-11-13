@@ -258,12 +258,38 @@ class PushError(RuntimeError):
     pass
 
 
+def device_port_style(conn) -> str | None:
+    """Формат имён портов на MES24xx: «1/0/N» (ПО 10.4.x) или «0/N» (ПО 10.3.x и старше).
+
+    Возвращает None, если понять не удалось: тогда отправка идёт без этой проверки."""
+    try:
+        out = send_show(conn, "show interfaces status", read_timeout=30)
+    except Exception:  # noqa: BLE001 — проверка вспомогательная
+        return None
+    names = re.findall(r"(?im)^\s*(?:gi|fa|te|ex|fo|tw)[a-z\-]*\s?(\d+(?:/\d+){1,2})\b", out)
+    if not names:
+        return None
+    three = sum(1 for n in names if n.count("/") == 2)
+    return "1/0/N" if three * 2 >= len(names) else "0/N"
+
+
 def push(dev: Device, password: str, config_text: str, save: bool = True, log=print) -> str:
     lines = prepare_lines(config_text)
     if not lines:
         raise PushError("Нечего отправлять")
     family = dev.family
     with connect(dev, password) as conn:
+        if family == "mes24xx":
+            from . import checker
+
+            used = checker.port_styles("\n".join(lines))
+            actual = device_port_style(conn) if used else None
+            if actual and used != {actual}:
+                raise PushError(
+                    f"На этом коммутаторе порты называются {actual}, а в файле они записаны как "
+                    f"{', '.join(sorted(used))}. Ничего не отправлено. Исправьте имена портов "
+                    "(например, gigabitethernet " + ("1/0/5" if actual == "1/0/N" else "0/5") + ") и повторите."
+                )
         log(f"[{dev.name}] отправляю {len(lines)} строк конфигурации…")
         try:
             out = conn.send_config_set(

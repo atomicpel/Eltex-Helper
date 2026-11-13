@@ -21,20 +21,22 @@ families:
       - "Автоматического отката нет: при работе удалённо меняйте порт управления осторожно."
       - "Команда «write» есть не во всех версиях ПО; «copy running-config startup-config» работает везде."
   mes24xx:
-    title: "Коммутаторы MES24xx (другой CLI, порты 0/N)"
+    title: "Коммутаторы MES14xx / MES24xx / MES3400 / MES37xx (ПО 10.x, порты 1/0/N или 0/N)"
     netmiko: eltex
-    port_format: "gigabitethernet 0/{n}"
+    port_format: "gigabitethernet 1/0/{n}"
     save: "write startup-config"
     save_prompt_answer: null
-    paging_off: "terminal datadump"
-    # на разных прошивках MES24xx отключение постраничного вывода называется по-разному
-    paging_off_variants: ["terminal datadump", "terminal length 0", "set cli pagination off"]
+    paging_off: "set cli pagination off"
+    paging_off_variants: ["set cli pagination off", "terminal length 0", "terminal datadump"]
     config_enter: "configure terminal"
     default_login: "admin / admin"
     notes:
-      - "CLI MES24xx заметно отличается от MES23xx: другие имена портов, сохранение, часть show-команд."
-      - "Интерфейсы по умолчанию могут быть выключены: после настройки нужен «no shutdown»."
-      - "Синтаксис этого семейства в базе пока сверен хуже остальных: проверяйте подсказки через «?» на устройстве."
+      - "Сверено с руководством по эксплуатации Eltex для ПО 10.4.6 и 10.3.1."
+      - "Имена портов зависят от версии ПО: 10.4.x — gigabitethernet 1/0/N, 10.3.x и старше — gigabitethernet 0/N. Узнать версию: «show bootvar»."
+      - "CLI отличается от MES23xx: VLAN создаётся командой «vlan N» + «vlan active», сохранение «write startup-config», таблица MAC «show mac-address-table», SSH включается «ssh enable»."
+      - "Постраничный вывод отключается командой «set cli pagination off»; «terminal datadump» здесь нет."
+      - "Заводской адрес 192.168.1.239/24 на VLAN 1. Новые интерфейсы VLAN выключены, пока не дан «no shutdown»."
+      - "Режим порта по умолчанию — general. Отдельной команды «switchport trunk allowed vlan» нет."
   esr:
     title: "Сервисные маршрутизаторы ESR (транзакционная конфигурация commit/confirm)"
     netmiko: eltex_esr
@@ -78,20 +80,59 @@ models:
   MES2411X:
     family: mes24xx
     kind: switch
-    description: "Коммутатор серии MES24xx (семейство требует подтверждения по «show version»)"
-    unverified: true
+    description: "Коммутатор агрегации: порты 1G и 10G SFP+, поддерживает стекирование"
   MES2408:
     family: mes24xx
     kind: switch
-    description: "Коммутатор доступа серии MES24xx"
+    description: "Коммутатор доступа, 8 портов 1G + аплинки"
   MES2408B:
     family: mes24xx
     kind: switch
-    description: "Коммутатор доступа серии MES24xx"
+    description: "8 портов 1G RJ-45 + 2 SFP, разъём для АКБ"
+  MES2408C:
+    family: mes24xx
+    kind: switch
+    description: "Вариант MES2408"
+  MES2408P:
+    family: mes24xx
+    kind: switch
+    description: "MES2408 с PoE"
+  MES2424:
+    family: mes24xx
+    kind: switch
+    description: "Коммутатор доступа, 24 порта 1G + аплинки 10G"
+  MES2424B:
+    family: mes24xx
+    kind: switch
+    description: "MES2424 с разъёмом для АКБ"
+  MES2424P:
+    family: mes24xx
+    kind: switch
+    description: "MES2424 с PoE"
   MES2428:
     family: mes24xx
     kind: switch
-    description: "Коммутатор доступа серии MES24xx"
+    description: "Коммутатор доступа, 24 порта 1G + 4 combo"
+  MES2428B:
+    family: mes24xx
+    kind: switch
+    description: "MES2428 с разъёмом для АКБ"
+  MES2428P:
+    family: mes24xx
+    kind: switch
+    description: "MES2428 с PoE"
+  MES2448B:
+    family: mes24xx
+    kind: switch
+    description: "48 портов 1G + аплинки 10G"
+  MES2448P:
+    family: mes24xx
+    kind: switch
+    description: "48 портов 1G с PoE + аплинки 10G"
+  MES3708P:
+    family: mes24xx
+    kind: switch
+    description: "Промышленный коммутатор с PoE"
   ESR-12V:
     family: esr
     kind: router

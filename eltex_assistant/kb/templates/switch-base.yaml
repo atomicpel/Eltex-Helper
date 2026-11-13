@@ -9,7 +9,7 @@ params:
   gateway: {help: "Шлюз по умолчанию", required: true}
   admin_user: {help: "Логин администратора", default: "netadmin"}
   admin_password: {help: "Пароль администратора", required: true, secret: true}
-  ntp_server: {help: "NTP/SNTP сервер", default: "pool.ntp.org"}
+  ntp_server: {help: "IP-адрес NTP/SNTP сервера", required: true}
   syslog_server: {help: "Syslog-сервер (пусто = не настраивать)", default: ""}
 bodies:
   mes23xx: |
@@ -32,13 +32,20 @@ bodies:
   mes24xx: |
     configure terminal
     hostname {{ hostname }}
-    vlan {{ mgmt_vlan }}
-    exit
+    {% if mgmt_vlan != "1" %}vlan {{ mgmt_vlan }}
+     vlan active
+    exit{% endif %}
     interface vlan {{ mgmt_vlan }}
      ip address {{ mgmt_ip }} {{ mgmt_mask }}
      no shutdown
     exit
     ip route 0.0.0.0 0.0.0.0 {{ gateway }}
     username {{ admin_user }} password {{ admin_password }} privilege 15
-    ip ssh server
+    ssh enable
+    sntp
+     set sntp client enabled
+     set sntp client addressing-mode unicast
+     set sntp unicast-server ipv4 {{ ntp_server }}
+    exit
+    clock time source ntp
     end

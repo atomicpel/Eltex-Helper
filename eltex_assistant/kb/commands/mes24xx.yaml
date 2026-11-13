@@ -1,24 +1,42 @@
-# Команды для семейства mes24xx (MES2408, MES2428, MES2411X?).
+# Команды для семейства mes24xx: MES14xx, MES24xx (MES2408B, MES2411X, MES2428…), MES3400, MES37xx.
 # Формат полей описан в mes23xx.yaml.
-# ВНИМАНИЕ: синтаксис этого семейства сверен хуже всего — большинство записей
-# помечены confidence: medium/low. Проверяйте через «?» и уточняйте базу.
+#
+# Сверено с «Руководством по эксплуатации» Eltex для ПО 10.4.6 (и 10.3.1 для отличий).
+# Главное отличие между версиями ПО — имена портов:
+#   ПО 10.4.x:           gigabitethernet 1/0/N   (юнит/слот/порт)
+#   ПО 10.3.x и старше:  gigabitethernet 0/N
+# В примерах ниже используется формат 10.4.x.
 
 commands:
   - id: show-version
     title: Версия ПО, модель, серийный номер
-    tags: [версия, прошивка, firmware, version, модель]
+    tags: [версия, прошивка, firmware, version, модель, серийный]
     mode: exec
     commands: |
-      show version
       show system information
-    confidence: medium
+      show bootvar
+      show system id
+    explain: "Команды «show version» на этой серии нет. «show bootvar» показывает образы ПО и какой из них активен, «show system id» — серийный номер и ревизию платы."
+    confidence: high
 
   - id: show-running
-    title: Посмотреть текущую конфигурацию
-    tags: [конфиг, конфигурация, running, config, показать]
+    title: Посмотреть текущую и сохранённую конфигурацию
+    tags: [конфиг, конфигурация, running, startup, config, показать]
     mode: exec
     commands: |
       show running-config
+      show running-config interface gigabitethernet 1/0/<N>
+      show startup-config
+    confidence: high
+
+  - id: paging
+    title: Отключить постраничный вывод (--More--)
+    tags: [more, постраничный, pagination, страницы, вывод, datadump, terminal]
+    mode: exec
+    commands: |
+      set cli pagination off
+      set cli pagination on
+    explain: "Команд «terminal datadump» и «terminal length 0» на этой серии нет."
     confidence: high
 
   - id: save-config
@@ -27,8 +45,8 @@ commands:
     mode: exec
     commands: |
       write startup-config
-    explain: "На MES24xx сохранение отличается от MES23xx: «copy running-config startup-config» может не работать."
-    confidence: medium
+    explain: "Без сохранения все изменения пропадут после перезагрузки. «copy running-config startup-config» здесь не используется: copy running-config нужен для выгрузки на сервер."
+    confidence: high
 
   - id: hostname
     title: Задать имя устройства
@@ -51,116 +69,204 @@ commands:
        no shutdown
       exit
       ip route 0.0.0.0 0.0.0.0 <ШЛЮЗ>
-    confidence: medium
+    example: |
+      configure terminal
+      interface vlan 1
+       ip address 192.168.16.144 255.255.255.0
+      exit
+      ip route 0.0.0.0 0.0.0.0 192.168.16.1
+    explain: "Заводской адрес — 192.168.1.239/24 на VLAN 1; он действует, пока не задан другой. Интерфейсы VLAN по умолчанию выключены (Admin down), поэтому для нового VLAN нужен «no shutdown». Команды «ip default-gateway» нет, шлюз задаётся маршрутом. Проверка: «show ip interface»."
+    confidence: high
 
   - id: user-create
-    title: Создать пользователя
-    tags: [пользователь, user, username, пароль, password]
+    title: Создать пользователя, сменить пароль admin
+    tags: [пользователь, user, username, пароль, password, логин]
     mode: config
     commands: |
-      username <логин> password <пароль> privilege 15
-    confidence: medium
+      username <логин> password <пароль> privilege <1-15>
+    example: |
+      configure terminal
+      username admin password Eltex_1
+      username operator password Pass_2 privilege 1
+    explain: "Уровень 15 — полный доступ, 1–14 — только просмотр. Заводской admin/admin существует, пока не создан другой пользователь с уровнем 15. Имена и пароли со спецсимволами берите в кавычки."
+    confidence: high
 
   - id: ssh-enable
-    title: Включить SSH
-    tags: [ssh, telnet, доступ]
+    title: Включить SSH, выключить telnet
+    tags: [ssh, telnet, доступ, удалённый]
     mode: config
     commands: |
-      ip ssh server
-    confidence: low
+      ssh enable
+      no feature telnet
+      feature telnet
+    explain: "«ssh enable» / «ssh disable» управляют SSH-сервером, «feature telnet» / «no feature telnet» — telnet-сервером. Проверка: «show ip ssh», «show telnet server». Сначала убедитесь, что SSH работает, и только потом выключайте telnet."
+    confidence: high
 
   - id: vlan-create
     title: Создать VLAN
     tags: [vlan, влан, создать]
     mode: config
     commands: |
-      vlan <ID>
-       name <имя>
+      vlan <ID>[,<ID>-<ID>]
+       vlan active
       exit
-    explain: "На MES24xx VLAN создаётся прямо в режиме config, без vlan database."
-    confidence: medium
+    example: |
+      configure terminal
+      vlan 10,20,100
+       vlan active
+      exit
+    explain: "«vlan database» на этой серии нет. Обязательно «vlan active»: без неё VLAN создан, но не работает."
+    confidence: high
 
   - id: port-access
     title: Порт доступа (access) в VLAN
-    tags: [access, порт, vlan, абонент, untagged]
+    tags: [access, порт, vlan, абонент, untagged, нетегированный]
     mode: interface
     commands: |
-      interface gigabitethernet 0/<N>
+      interface gigabitethernet 1/0/<N>
        switchport mode access
        switchport access vlan <ID>
-       no shutdown
       exit
-    explain: "Имена портов на MES24xx в формате 0/N, а не 1/0/N."
-    confidence: medium
+    example: |
+      configure terminal
+      interface gigabitethernet 1/0/1
+       switchport mode access
+       switchport access vlan 10
+      exit
+    explain: "Режим порта по умолчанию на этой серии — general, а не access."
+    firmware: "На ПО 10.3.x и старше порт называется gigabitethernet 0/<N>."
+    confidence: high
 
   - id: port-trunk
     title: Транковый порт (trunk)
     tags: [trunk, транк, тег, tagged, аплинк, uplink]
     mode: interface
     commands: |
-      interface gigabitethernet 0/<N>
+      interface gigabitethernet 1/0/<N>
        switchport mode trunk
-       switchport trunk allowed vlan <список>
-       no shutdown
+       switchport trunk native vlan <ID>
+       switchport forbidden vlan add <список>
       exit
-    confidence: low
+    example: |
+      configure terminal
+      interface gigabitethernet 1/0/10
+       switchport mode trunk
+      exit
+    explain: "Команды «switchport trunk allowed vlan» в руководстве нет: транк принимает тегированный трафик созданных VLAN. Нетегированный VLAN задаёт «switchport trunk native vlan», а запретить отдельные VLAN на порту можно через «switchport forbidden vlan add». Если нужно явно перечислить VLAN на порту, используйте режим general."
+    firmware: "На ПО 10.3.x и старше порт называется gigabitethernet 0/<N>."
+    confidence: high
+
+  - id: port-general
+    title: Порт в режиме general (тег + нетег, явный список VLAN)
+    tags: [general, гибрид, hybrid, tagged, untagged, pvid]
+    mode: interface
+    commands: |
+      interface gigabitethernet 1/0/<N>
+       switchport mode general
+       switchport general allowed vlan add <список>
+       switchport general allowed vlan add <ID> untagged
+       switchport general pvid <ID>
+      exit
+    example: |
+      interface gigabitethernet 1/0/13
+       switchport general allowed vlan add 10 untagged
+       switchport general pvid 10
+    explain: "Без слова untagged VLAN добавляется тегированным. Убрать: «switchport general allowed vlan remove <список>»."
+    confidence: high
 
   - id: interface-range
     title: Настроить сразу несколько портов
-    tags: [range, диапазон, несколько]
+    tags: [range, диапазон, несколько, группа]
     mode: config
     commands: |
-      interface range gigabitethernet 0/<N>-<M>
-    confidence: medium
+      interface range gigabitethernet 1/0/<N>-<M>
+    example: |
+      interface range gi 1/0/1-2
+       no shutdown
+    confidence: high
+
+  - id: port-description
+    title: Описание порта, включить/выключить порт
+    tags: [description, описание, shutdown, выключить, включить]
+    mode: interface
+    commands: |
+      description <текст>
+      shutdown
+      no shutdown
+    confidence: high
 
   - id: show-interfaces
     title: Состояние портов
-    tags: [порты, интерфейсы, status, линк, состояние]
+    tags: [порты, интерфейсы, status, линк, link, состояние, ошибки, counters]
     mode: exec
     commands: |
       show interfaces status
-      show interface description
-    confidence: low
+      show interfaces description
+      show interfaces counters
+      show interfaces utilization
+      show interfaces gigabitethernet 1/0/<N>
+    confidence: high
 
   - id: show-vlan
-    title: Список VLAN
+    title: Список VLAN и портов в них
     tags: [vlan, показать, show]
     mode: exec
     commands: |
       show vlan
+      show vlan id <ID>
+      show interfaces switchport gigabitethernet 1/0/<N>
     confidence: high
 
   - id: show-mac
-    title: Таблица MAC-адресов
-    tags: [mac, мак, fdb, найти]
+    title: Таблица MAC-адресов, найти порт по MAC
+    tags: [mac, мак, fdb, найти, где]
     mode: exec
     commands: |
       show mac-address-table
-    explain: "Обратите внимание: через дефис (mac-address-table), в отличие от MES23xx."
-    confidence: low
-
-  - id: stp
-    title: Spanning Tree
-    tags: [stp, rstp, spanning-tree, петля]
-    mode: config
-    commands: |
-      spanning-tree mode rst
-    confidence: low
-
-  - id: ping-trace
-    title: Проверка связи
-    tags: [ping, пинг, связь]
-    mode: exec
-    commands: |
-      ping <IP>
+      show mac-address-table address <MAC>
+      show mac-address-table vlan <ID>
+      show mac-address-table count
+    explain: "Пишется через дефис: mac-address-table (на MES23xx — «mac address-table»)."
     confidence: high
 
-  - id: reload
-    title: Перезагрузка
-    tags: [reload, перезагрузка, reboot]
-    mode: exec
+  - id: stp
+    title: Spanning Tree (защита от петель)
+    tags: [stp, rstp, mstp, spanning-tree, петля, loop]
+    mode: config
     commands: |
-      reload
+      spanning-tree
+      spanning-tree mode {rst | mst | rapid-pvst}
+      spanning-tree priority <значение>
+      interface gigabitethernet 1/0/<N>
+       spanning-tree portfast
+       spanning-tree bpduguard enable
+    explain: "Режим по умолчанию — MSTP. Режимы называются rst и mst (не rstp/mstp). portfast и bpduguard ставьте только на абонентские порты. Полностью выключить модуль: «shutdown spanning-tree». Проверка: «show spanning-tree»."
+    confidence: high
+
+  - id: loopback-detection
+    title: Обнаружение петель (loopback-detection)
+    tags: [петля, loop, loopback, кольцо]
+    mode: config
+    commands: |
+      loopback-detection enable
+      interface gigabitethernet 1/0/<N>
+       loopback-detection enable
+    explain: "Включается глобально и на порту. Проверка: «show loopback-detection»."
+    confidence: high
+
+  - id: lag
+    title: Агрегация каналов (LACP, port-channel)
+    tags: [lacp, lag, port-channel, агрегация, etherchannel, bonding]
+    mode: config
+    commands: |
+      set port-channel enable
+      interface port-channel <номер>
+       no shutdown
+      exit
+      interface range gigabitethernet 1/0/<N>-<M>
+       no shutdown
+       channel-group <номер> mode active
+    explain: "mode active/passive — LACP, mode on — статическая группа. Сначала «set port-channel enable», иначе группы не работают. Проверка: «show etherchannel summary», «show lacp <номер>»."
     confidence: high
 
   - id: lldp-neighbors
@@ -170,15 +276,160 @@ commands:
     commands: |
       show lldp neighbors
       show lldp neighbors detail
-    confidence: low
+      show lldp local
+    explain: "Если соседей нет, включите LLDP в режиме config: «set lldp enable» (при необходимости «no shutdown lldp»)."
+    confidence: high
 
   - id: remote-connect
     title: Подключиться с этого коммутатора к соседнему
-    tags: [telnet, ssh, сосед, перейти, подключиться, зайти, другой, коммутатор, транк]
+    tags: [telnet, ssh, сосед, перейти, подключиться, зайти, другой, коммутатор, транк, прыжок, jump]
     mode: exec
     commands: |
-      show lldp neighbors
+      show lldp neighbors detail
       ping <IP соседа>
       telnet <IP соседа>
-    explain: "VLAN управления должен быть разрешён в транке на обоих концах."
-    confidence: low
+      ssh <IP соседа> -l <логин>
+    explain: "На этой серии есть и telnet-, и ssh-клиент. Пинг пройдёт, только если VLAN управления есть на транке с обеих сторон и у обоих коммутаторов есть адрес в нём."
+    confidence: medium
+
+  - id: dhcp-snooping
+    title: DHCP snooping (защита от чужих DHCP-серверов)
+    tags: [dhcp, snooping, защита, rogue]
+    mode: config
+    commands: |
+      ip dhcp snooping
+      interface <аплинк>
+       port-security-state trusted
+       set port-role uplink
+    explain: "Доверенным делают порт, за которым стоит настоящий DHCP-сервер (обычно аплинк). Проверка: «show ip dhcp snooping global». Полный набор параметров уточните через «ip dhcp snooping ?»."
+    confidence: medium
+
+  - id: ntp
+    title: Синхронизация времени (SNTP) и часовой пояс
+    tags: [ntp, sntp, время, time, clock, часовой]
+    mode: config
+    commands: |
+      sntp
+       set sntp client enabled
+       set sntp client addressing-mode unicast
+       set sntp unicast-server ipv4 <IP>
+       set sntp client time-zone <+ЧЧ:ММ>
+      exit
+      clock time source ntp
+    example: |
+      sntp
+       set sntp client enabled
+       set sntp client addressing-mode unicast
+       set sntp unicast-server ipv4 192.168.1.1
+       set sntp client time-zone +03:00
+      exit
+      clock time source ntp
+    explain: "В таблице команд руководства клиент включается как «set sntp client enable», в примере — «enabled»; если одна форма не принимается, используйте другую. Проверка: «show sntp status»."
+    confidence: high
+
+  - id: syslog
+    title: Отправка логов на syslog-сервер
+    tags: [syslog, логи, logging, журнал]
+    mode: config
+    commands: |
+      logging on
+      logging-server <facility> severity <уровень> ipv4 <IP> [port <порт>]
+    explain: "Точный порядок параметров уточните через «logging-server ?»: в руководстве команда описана как «logging-server facility {facility} severity {severity} {ipv4 | ipv6} ip_address». Просмотр журнала: «show logging»."
+    confidence: medium
+
+  - id: snmp
+    title: SNMP для мониторинга (v2c)
+    tags: [snmp, мониторинг, zabbix, community]
+    mode: config
+    commands: |
+      snmp user <USER>
+      snmp community index 1 name <community> security <USER>
+      snmp group <GROUP> user <USER> security-model v2c
+      snmp access <GROUP> v2c read iso write iso notify iso
+      snmp view iso 1 included
+    explain: "В отличие от MES23xx, одной строки «snmp-server community» недостаточно: community привязывается к пользователю, пользователь к группе, группе выдаётся доступ к view. Для доступа только на чтение уберите «write iso»."
+    confidence: high
+
+  - id: storm-control
+    title: Ограничение широковещательного шторма
+    tags: [storm, шторм, broadcast, multicast]
+    mode: interface
+    commands: |
+      storm-control broadcast level {pps | kbps} <значение>
+      storm-control multicast level {pps | kbps} <значение>
+      storm-control dlf level {pps | kbps} <значение>
+    explain: "dlf — неизвестный одноадресный трафик. Единицы измерения задаются глобально: «storm-control mode {kbps | pps}»."
+    confidence: medium
+
+  - id: port-security
+    title: Ограничение числа MAC на порту
+    tags: [port-security, безопасность, mac, лимит]
+    mode: interface
+    commands: |
+      switchport port-security enable
+      switchport port-security mac-limit <N>
+      switchport port-security mode max-addresses
+    confidence: medium
+
+  - id: static-route
+    title: Статический маршрут
+    tags: [маршрут, route, static, шлюз]
+    mode: config
+    commands: |
+      ip route <сеть> <маска> <next-hop>
+    explain: "Проверка: «show ip route»."
+    confidence: high
+
+  - id: firmware-update
+    title: Обновление прошивки
+    tags: [прошивка, обновление, firmware, update, upgrade, boot, tftp]
+    mode: exec
+    commands: |
+      copy tftp://<IP>/<файл> image
+      firmware upgrade tftp://<IP>/<файл>
+      show bootvar
+      reload
+    explain: "Новый образ пишется в неактивную область и становится активным после перезагрузки. Загрузиться с другого образа: «boot system inactive». Есть варианты через sftp:// и usb://. При понижении версии ниже 10.4.0 есть особенности — смотрите руководство. Перед перезагрузкой сохраните конфигурацию."
+    confidence: high
+
+  - id: backup-config
+    title: Резервная копия конфигурации на сервер
+    tags: [бэкап, backup, tftp, копия, резерв]
+    mode: exec
+    commands: |
+      copy running-config tftp://<IP>/<файл>
+      copy startup-config tftp://<IP>/<файл>
+      copy tftp://<IP>/<файл> startup-config
+    confidence: high
+
+  - id: factory-reset
+    title: Сброс конфигурации
+    tags: [сброс, reset, заводские, erase, delete, default]
+    mode: exec
+    commands: |
+      erase startup-config
+      delete startup-config
+      reload
+    explain: "«erase startup-config» удаляет файл конфигурации; «delete startup-config» дополнительно очищает настройки в nvram и удаляет пользователей."
+    confidence: high
+
+  - id: ping-trace
+    title: Проверка связи
+    tags: [ping, пинг, traceroute, связь]
+    mode: exec
+    commands: |
+      ping <IP>
+      traceroute <IP>
+    confidence: high
+
+  - id: reload
+    title: Перезагрузка (в том числе отложенная)
+    tags: [reload, перезагрузка, reboot]
+    mode: exec
+    commands: |
+      reload
+      reload in <часы> <минуты>
+      reload cancel
+      show reload
+    explain: "«reload in» удобен как страховка при удалённой настройке: запланируйте перезагрузку, внесите изменения без сохранения, и если потеряете доступ — коммутатор сам вернётся к сохранённой конфигурации. Если всё хорошо: «reload cancel» и «write startup-config»."
+    confidence: high
