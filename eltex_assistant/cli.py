@@ -284,6 +284,72 @@ def cmd_ssh_push(args) -> None:
         sys.exit(1)
 
 
+def cmd_firmware_check(args) -> None:
+    from . import firmware
+
+    try:
+        info = firmware.available(knowledge.get_model(args.model).name)
+    except (firmware.FirmwareError, knowledge.UnknownModel) as e:
+        sys.exit(str(e))
+    _out(f"{info['product']}" + (f" ({', '.join(info['lifecycle'])})" if info["lifecycle"] else ""))
+    if not info["releases"]:
+        _out(f"Файлов ПО не найдено. Страница загрузок: {info['page']}")
+    for r in info["releases"]:
+        _out(f"  {r['version']:<10} {r['name']}  {r['size']}  {r['date']}\n             {r['url']}")
+    if info["notes"] and args.notes:
+        _out("\nЧто нового в актуальной версии:\n" + info["notes"])
+    if args.download and info["releases"]:
+        firmware.download(info["releases"][0]["url"], args.download, _out)
+
+
+def cmd_firmware_update(args) -> None:
+    from . import automation, firmware
+
+    devs = _select_devices(args)
+    if len(devs) != 1:
+        sys.exit("Обновление выполняется по одному устройству: укажите -d ИМЯ или --host.")
+    d = devs[0]
+    pw = _passwords(devs)[d.name]
+
+    def ask(question: str) -> bool:
+        return args.yes or input(question + " Введите «да»: ").strip().lower() in ("да", "yes", "y")
+
+    try:
+        current = firmware.device_version(d, pw)["version"]
+        _out(f"{d.name} ({d.model}): на устройстве версия {current or 'не определена'}")
+        if args.file:
+            archive = Path(args.file)
+        else:
+            rels = firmware.available(d.model)["releases"]
+            if not rels:
+                sys.exit("На сайте Eltex для этой модели файлов ПО не нашлось. Скачайте файл сами и укажите --file.")
+            check = firmware.plan(d.model, current, rels[0]["version"],
+                                  automation.read_config(d, pw) if d.family == "esr" else "")
+            for w in check["blockers"] + (check["warnings"] if check["ok"] else []):
+                _out("  ! " + w)
+            if not check["ok"]:
+                sys.exit(1)
+            if not ask(f"Скачать и загрузить на устройство версию {rels[0]['version']}?"):
+                return _out("Отменено.")
+            archive = firmware.download(rels[0]["url"], args.folder, _out)
+        pkg = firmware.unpack(archive, d.family, _out)
+        check = firmware.plan(d.model, current, pkg.version)
+        if pkg.version and not check["ok"]:
+            sys.exit(" ".join(check["blockers"]))
+        if args.file and not ask(f"Загрузить на устройство {pkg.image.name}?"):
+            return _out("Отменено.")
+        res = firmware.upload(d, pw, pkg, _out, tftp_port=args.tftp_port, backup_dir=args.backups)
+        _out(res["bootvar"])
+        if args.no_reload or not ask("Перезагрузить устройство сейчас? Связь через него пропадёт на несколько минут."):
+            return _out("Перезагрузка не выполнялась. Новое ПО начнёт работать после перезагрузки.")
+        firmware.reload(d, pw, log=_out)
+        firmware.wait_back(d, pw, _out)
+    except firmware.FirmwareError as e:
+        sys.exit(str(e))
+    except Exception as e:  # noqa: BLE001
+        sys.exit(automation.friendly_error(e, d))
+
+
 def cmd_neighbors(args) -> None:
     from . import automation
 
@@ -435,6 +501,23 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("-v", "--verbose", action="store_true", help="показать вывод устройства")
     s.add_argument("--continue-on-error", action="store_true")
     s.set_defaults(func=cmd_ssh_push)
+    fw = sub.add_parser("firmware", aliases=["fw"], help="обновление ПО: найти, скачать, загрузить на устройство"
+                        ).add_subparsers(dest="fcmd", required=True)
+    s = fw.add_parser("check", help="какое ПО есть на сайте Eltex для модели: eltex firmware check -m MES2324")
+    s.add_argument("-m", "--model", required=True)
+    s.add_argument("--notes", action="store_true", help="показать, что нового в актуальной версии")
+    s.add_argument("--download", metavar="ПАПКА", help="скачать актуальную версию в папку")
+    s.set_defaults(func=cmd_firmware_check)
+    s = fw.add_parser("update", help="обновить ПО устройства (бэкап, TFTP, загрузка, перезагрузка по подтверждению)")
+    target_opts(s)
+    s.add_argument("--file", help="архив zip или файл ПО, скачанный вручную (иначе берётся с сайта Eltex)")
+    s.add_argument("--folder", default="firmware", help="куда скачивать ПО (по умолчанию firmware)")
+    s.add_argument("--backups", default="backups", help="куда сохранить резервную копию конфигурации")
+    s.add_argument("--tftp-port", type=int, default=69)
+    s.add_argument("--no-reload", action="store_true", help="только загрузить ПО, не перезагружать")
+    s.add_argument("-y", "--yes", action="store_true", help="не спрашивать подтверждения")
+    s.set_defaults(func=cmd_firmware_update)
+
     s = sub.add_parser("scan", help="сканировать сеть: eltex scan 192.168.1.0/24")
     s.add_argument("targets", nargs="+", help="подсеть, диапазон или адреса: 10.0.0.0/24  10.0.0.10-50")
     s.add_argument("-c", "--community", action="append", help="SNMP community (можно несколько; по умолчанию public)")

@@ -8,3 +8,4 @@ dist/
 /inventory.yaml
 backups/
 dist/
+firmware/

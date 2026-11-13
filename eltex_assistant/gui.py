@@ -315,6 +315,88 @@ class App:
 
         return {"job": self.jobs.start(self._wrap(dev, work))}
 
+    # ------------------------------------------------------------ обновление ПО
+
+    def fw_check(self, body) -> dict:
+        """Версия ПО на устройстве, что есть на сайте Eltex и можно ли обновлять."""
+        from . import automation, firmware
+
+        dev, password = self._device(body.get("target"))
+
+        def work(job):
+            log = job["log"].append
+            log("Узнаю версию ПО на устройстве…")
+            current = firmware.device_version(dev, password)["version"]
+            log(f"На устройстве версия {current or 'не определена'}. Ищу ПО на сайте Eltex…")
+            res = {"model": dev.model, "current": current, "releases": [], "notes": "", "page": "",
+                   "lifecycle": [], "site_error": "", "plan": None, "target": ""}
+            try:
+                res.update(firmware.available(dev.model))
+            except firmware.FirmwareError as e:
+                res["site_error"] = str(e)
+                return res
+            if res["releases"]:
+                res["target"] = res["releases"][0]["version"]
+                config = ""
+                if dev.family == "esr":  # для ESR инструкция требует проверить конфигурацию перед обновлением
+                    log("Проверяю конфигурацию на настройки, которые меняются при обновлении…")
+                    config = automation.read_config(dev, password)
+                res["plan"] = firmware.plan(dev.model, current, res["target"], config)
+            return res
+
+        return {"job": self.jobs.start(self._wrap(dev, work))}
+
+    def fw_upload(self, body) -> dict:
+        """Скачивает ПО (или берёт указанный файл), делает бэкап и загружает ПО на устройство. Без перезагрузки."""
+        from . import firmware
+
+        dev, password = self._device(body.get("target"))
+        url, file = (body.get("url") or "").strip(), (body.get("file") or "").strip().strip('"')
+        if not url and not file:
+            raise ApiError("Не выбрана версия ПО и не указан файл прошивки")
+        if body.get("confirm") is not True:
+            raise ApiError("Загрузка ПО не подтверждена")
+        if dev.transport == "serial":
+            raise ApiError("Через консольный порт файл ПО не передать. Подключитесь по SSH или telnet.")
+        base = self.inventory_path.parent
+
+        def work(job):
+            log = job["log"].append
+            if file:
+                archive = Path(file)
+            else:
+                log("Скачиваю ПО с сайта Eltex…")
+                archive = firmware.download(url, base / "firmware", log,
+                                            lambda done, total: job.__setitem__("progress", [done, total]))
+                job["progress"] = None
+            pkg = firmware.unpack(archive, dev.family, log)
+            current = firmware.device_version(dev, password)["version"]
+            check = firmware.plan(dev.model, current, pkg.version)
+            if pkg.version and not check["ok"]:
+                raise ApiError(" ".join(check["blockers"]))
+            log(f"На устройстве {current or 'версия не определена'}, загружаю {pkg.version or pkg.image.name}.")
+            res = firmware.upload(dev, password, pkg, log, backup_dir=base / "backups")
+            res.update(current=current, version=pkg.version, image=pkg.image.name)
+            return res
+
+        return {"job": self.jobs.start(self._wrap(dev, work))}
+
+    def fw_reload(self, body) -> dict:
+        from . import firmware
+
+        dev, password = self._device(body.get("target"))
+        if body.get("confirm") is not True:
+            raise ApiError("Перезагрузка не подтверждена")
+
+        def work(job):
+            log = job["log"].append
+            firmware.reload(dev, password, log=log)
+            if dev.transport == "serial":
+                return {"version": ""}
+            return {"version": firmware.wait_back(dev, password, log)}
+
+        return {"job": self.jobs.start(self._wrap(dev, work))}
+
     def job(self, q) -> dict:
         j = self.jobs.get(q.get("id", ""))
         return {k: j[k] for k in ("done", "log", "result", "error", "progress")}
@@ -324,7 +406,8 @@ class App:
     ROUTES_POST = {"/api/render": "render", "/api/check": "check", "/api/inventory": "inventory_save",
                    "/api/scan": "scan", "/api/run": "run", "/api/backup": "backup", "/api/push": "push",
                    "/api/term/open": "term_open", "/api/term/write": "term_write", "/api/term/close": "term_close",
-                   "/api/hint": "hint", "/api/overview": "overview"}
+                   "/api/hint": "hint", "/api/overview": "overview",
+                   "/api/fw/check": "fw_check", "/api/fw/upload": "fw_upload", "/api/fw/reload": "fw_reload"}
 
 
 def make_handler(app: App, allowed_hosts: set[str]):

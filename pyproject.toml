@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "eltex-assistant"
-version = "0.5.0"
+version = "0.6.0"
 description = "Помощник по коммутаторам и маршрутизаторам Eltex: команды, шаблоны, проверка конфигураций, SSH"
 requires-python = ">=3.8"
 dependencies = ["PyYAML>=6", "Jinja2>=3", "netmiko>=4.3", "pyserial>=3.4"]
