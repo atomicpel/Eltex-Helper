@@ -52,7 +52,7 @@ def _sample_params(t):
     for k, spec in t.params.items():
         if spec.get("required"):
             vals[k] = {"mgmt_ip": "10.0.0.10", "gateway": "10.0.0.1", "vlan": "10", "ports": "1-8",
-                       "uplink_vlans": "10,100"}.get(k, "Str0ngPass")
+                       "uplink_vlans": "10,100", "ntp_server": "10.0.0.5"}.get(k, "Str0ngPass")
     if "uplink" in vals:
         vals["uplink"] = "gigabitethernet 1/0/10"
     return vals
@@ -62,8 +62,6 @@ def _sample_params(t):
 def test_templates_render_and_pass_checker(t):
     for fam in t.bodies:
         vals = _sample_params(t)
-        if fam == "mes24xx" and "uplink" in vals:
-            vals["uplink"] = "gigabitethernet 0/10"
         text = templates.render(t.name, fam, vals)
         assert "{{" not in text and "{%" not in text
         errors = [i for i in checker.check(text, fam) if i.level == "ошибка"]
@@ -86,9 +84,41 @@ def test_esr_template_wan_variants():
 def test_checker_cross_family():
     assert checker.check("ip address 10.0.0.1 255.255.255.0", "esr")
     assert checker.check("commit", "mes23xx")
-    assert checker.check("interface gigabitethernet 1/0/1", "mes24xx")
+    assert not checker.check("interface gigabitethernet 1/0/1", "mes24xx")
     assert checker.check("vlan database", "mes24xx")
     assert not checker.check("interface gigabitethernet 1/0/1\n ip address 10.0.0.1/24\ncommit\nconfirm", "esr")
+
+
+@pytest.mark.parametrize("line", [
+    "copy running-config startup-config", "write memory", "vlan database",
+    "switchport trunk allowed vlan add 10", "ip ssh server", "ip default-gateway 10.0.0.1",
+    "terminal datadump", "show mac address-table", "sntp server 10.0.0.5", "snmp-server community public ro",
+    "logging host 10.0.0.9", "spanning-tree bpduguard", "spanning-tree mode rstp", "commit",
+])
+def test_checker_mes24xx_rejects_foreign_syntax(line):
+    """Синтаксис MES23xx/ESR, которого нет в ПО 10.x (сверено с руководством 10.4.6)."""
+    assert [i for i in checker.check(line, "mes24xx") if i.level == "ошибка"], line
+
+
+def test_checker_mes24xx_port_naming_and_vlan_active():
+    levels = lambda text: [i.level for i in checker.check(text, "mes24xx")]  # noqa: E731
+    assert levels("interface gigabitethernet 0/1\n no shutdown") == ["внимание"]
+    assert "ошибка" in levels("interface gigabitethernet 0/1\ninterface gigabitethernet 1/0/2")
+    assert levels("vlan 10,20") == ["внимание"]
+    assert levels("vlan 10,20\n vlan active") == []
+    assert checker.port_styles("interface range gi 1/0/1-8\ninterface gi 0/2") == {"1/0/N", "0/N"}
+
+
+def test_mes2408b_reference_matches_manual():
+    assert knowledge.get_model("MES2408B").family == "mes24xx"
+    assert knowledge.get_model("MES2411X").family == "mes24xx"
+    by_id = {c.id: c for c in knowledge.commands("mes24xx")}
+    text = lambda cid: str(by_id[cid].commands)  # noqa: E731
+    assert "set cli pagination off" in text("paging")
+    assert "write startup-config" in text("save-config")
+    assert "vlan active" in text("vlan-create")
+    assert "show system information" in text("show-version")
+    assert "allowed vlan" not in text("port-trunk") or "general" in text("port-trunk")
 
 
 def test_prepare_lines():
@@ -120,6 +150,26 @@ class FakeConn:
     def send_command_timing(self, cmd, **kw):
         self.log.append(cmd)
         return "Overwrite file [startup-config].... (Y/N)[N] ?" if cmd.startswith("copy") else ""
+
+
+class StyleConn(FakeConn):
+    """Коммутатор MES24xx с ПО 10.4.x: порты 1/0/N."""
+    base_prompt = "sw"
+
+    def send_command(self, cmd, **kw):
+        self.log.append(cmd)
+        return "Port      Status  Duplex Speed\nGi1/0/1   up      Full   1000\nGi1/0/2   down    -      -\n"
+
+
+def test_push_mes24xx_stops_on_wrong_port_naming(monkeypatch):
+    log = []
+    monkeypatch.setattr(automation, "connect", lambda d, p: StyleConn(log))
+    dev = automation.Device("sw", "h", "MES2408B")
+    with pytest.raises(automation.PushError, match="1/0/N"):
+        automation.push(dev, "pw", "interface gigabitethernet 0/3\n shutdown", log=lambda *_: None)
+    assert not any(isinstance(x, tuple) for x in log)  # в конфигурацию ничего не ушло
+    automation.push(dev, "pw", "interface gigabitethernet 1/0/3\n shutdown", log=lambda *_: None)
+    assert log[-1] == "write startup-config"
 
 
 def test_push_mes23xx_saves(monkeypatch):
