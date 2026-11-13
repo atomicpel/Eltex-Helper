@@ -69,6 +69,21 @@ th{color:var(--muted);font-weight:600;font-size:13px}
 .check{display:flex;gap:8px;align-items:center;font-size:14px;color:var(--ink)} .check input{width:auto}
 dialog{border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);max-width:640px;width:92vw;padding:20px}
 dialog::backdrop{background:rgba(0,0,0,.5)}
+main.wide{max-width:none}
+.termgrid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;align-items:start}
+.term{background:#0b121b;color:#d9e6f5;border-radius:10px;padding:10px 12px;font:14px/1.35 var(--mono);height:68vh;min-height:320px;overflow:auto;white-space:pre;cursor:text;border:2px solid transparent;margin:0;max-height:none}
+.term:focus{outline:none;border-color:var(--accent)}
+.term .cur{background:#d9e6f5;color:#0b121b}
+.term:not(:focus) .cur{background:transparent;outline:1px solid #d9e6f5;color:inherit}
+.termbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--muted);margin-right:6px}
+.dot.on{background:var(--ok)} .dot.wait{background:var(--warn)}
+.helper{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow:auto}
+.helper .card{padding:12px 14px}
+.hintcmd{display:block;width:100%;text-align:left;font:13px/1.4 var(--mono);background:var(--code-bg);color:var(--code-ink);border:1px solid transparent;border-radius:6px;padding:5px 8px;margin:3px 0;cursor:pointer;white-space:pre-wrap;word-break:break-word}
+.hintcmd:hover{border-color:var(--accent)}
+.hinttitle{font-size:13px;font-weight:600;margin:8px 0 2px}
+@media (max-width:1000px){.termgrid{grid-template-columns:1fr}.helper{position:static;max-height:none}}
 @media (max-width:820px){.app{grid-template-columns:1fr}nav{position:static;height:auto;flex-direction:row;flex-wrap:wrap}nav .model{margin:0;border:0;flex:1 1 100%}main{padding:18px 16px}.split{grid-template-columns:1fr}}
 </style>
 </head>
@@ -81,6 +96,7 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
     <button data-tab="chk">Проверка конфигурации</button>
     <button data-tab="net">Сканирование сети</button>
     <button data-tab="dev">Устройства</button>
+    <button data-tab="term">Терминал</button>
     <div class="model">
       <label for="model">Модель</label>
       <select id="model"></select>
@@ -146,7 +162,7 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
             <h3>Выполнить команды</h3>
             <div class="meta" id="quick"></div>
             <textarea id="cmds" style="min-height:110px" placeholder="show version"></textarea>
-            <p><button class="btn primary" id="rungo">Выполнить</button> <button class="btn" id="bakgo">Сделать бэкап</button></p>
+            <p><button class="btn primary" id="rungo">Выполнить</button> <button class="btn" id="bakgo">Сделать бэкап</button> <button class="btn" id="ovgo">Обзор конфигурации</button></p>
           </div>
           <div class="card">
             <h3>Применить конфигурацию</h3>
@@ -156,6 +172,38 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
           </div>
         </div>
         <div id="devout"></div>
+      </div>
+    </section>
+    <section id="tab-term" class="hidden">
+      <h1>Терминал</h1>
+      <p class="lead">Живой сеанс, как в PuTTY: всё, что вы печатаете, сразу уходит на устройство, ответ появляется по мере поступления. Работают «?», Tab и стрелки. Справа помощник: он подсказывает команды под модель и предупреждает об ошибке ещё до нажатия Enter.</p>
+      <div class="row">
+        <div><label for="termdev">Устройство</label><select id="termdev"></select></div>
+        <div><label for="termpass">Пароль (не сохраняется)</label><input id="termpass" type="password" autocomplete="off"></div>
+        <div style="flex:0 0 auto"><button class="btn primary" id="termgo">Подключиться</button> <button class="btn" id="termstop" disabled>Отключиться</button></div>
+      </div>
+      <div class="termgrid">
+        <div>
+          <pre class="term" id="term" tabindex="0" aria-label="Окно терминала"></pre>
+          <div class="termbar">
+            <span id="termstate"><span class="dot"></span>Не подключено</span>
+            <span style="flex:1"></span>
+            <button class="btn small" id="termpaste">Вставить из буфера</button>
+            <button class="btn small" id="termclear">Очистить окно</button>
+            <button class="btn small" id="termsave">Сохранить журнал</button>
+          </div>
+          <div class="meta">Щёлкните по окну, чтобы печатать. Вставка: Ctrl+V или Shift+Insert. Копирование: выделите текст мышью и нажмите Ctrl+Insert.</div>
+        </div>
+        <div class="helper">
+          <div class="card">
+            <h3>Помощник</h3>
+            <div class="meta" id="hintmodel">Подключитесь к устройству: программа прочитает его конфигурацию, расскажет, что настроено, и подскажет, что сделать.</div>
+            <div id="hintlive"></div>
+            <input id="hintq" placeholder="Что нужно сделать? Например: транк">
+            <div id="hintres"></div>
+            <div id="overview"></div>
+          </div>
+        </div>
       </div>
     </section>
   </main>
@@ -216,6 +264,8 @@ document.querySelectorAll("nav button").forEach(b => b.addEventListener("click",
 function showTab(name){
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
   document.querySelectorAll("main section").forEach(s => s.classList.toggle("hidden", s.id !== "tab-" + name));
+  document.querySelector("main").classList.toggle("wide", name === "term");
+  if (name === "term" && TERM.id) $("term").focus();
 }
 
 // ---------------------------------------------------------------- справочник
@@ -328,10 +378,15 @@ function renderDevices(){
     h("td", {}, h("b", {}, d.name)), h("td", {}, d.model), h("td", {}, TRANSPORT[d.transport || "ssh"]),
     h("td", {class:"mono"}, d.transport === "serial" ? d.serial_port : d.host), h("td", {}, d.username || "admin"),
     h("td", {}, h("button", {class:"btn small primary", onclick:() => selectDevice(d)}, "Работать"), " ",
+      h("button", {class:"btn small", onclick:() => { $("termdev").value = String(i); showTab("term"); $("termpass").focus(); }}, "Терминал"), " ",
       h("button", {class:"btn small", onclick:() => editDevice(i)}, "Изменить"), " ",
       h("button", {class:"btn small", onclick:() => { if (confirm("Удалить «" + d.name + "» из списка?")){ DEVICES.splice(i, 1); saveDevices(); } }}, "Удалить"))));
   $("devtable").replaceChildren(h("tr", {}, ["Имя","Модель","Подключение","Адрес или порт","Логин",""].map(t => h("th", {}, t))),
     ...(rows.length ? rows : [h("tr", {}, h("td", {colspan:6, class:"meta"}, "Пока пусто. Добавьте устройство вручную или найдите его на вкладке «Сканирование сети»."))]));
+  const keep = $("termdev").value;
+  $("termdev").replaceChildren(...(DEVICES.length ? DEVICES.map((d, i) => h("option", {value:String(i)}, d.name + " · " + d.model + " · " + (d.transport === "serial" ? d.serial_port : d.host)))
+    : [h("option", {value:""}, "Сначала добавьте устройство на вкладке «Устройства»")]));
+  if (keep && DEVICES[+keep]) $("termdev").value = keep;
 }
 async function editDevice(index){
   const d = index == null ? {transport:"ssh", username:"admin", model:model()} : {...DEVICES[index]};
@@ -393,6 +448,37 @@ $("rungo").addEventListener("click", ev => devOp(ev.target, "Команды", "/
 $("bakgo").addEventListener("click", ev => devOp(ev.target, "Бэкап", "/api/backup", {target:target()}, (c, r) => {
   c.append(h("div", {class:"issue ok"}, "Сохранено в " + r.path), r.diff ? h("div", {}, h("div", {class:"meta"}, "Изменения с прошлого бэкапа"), codeBlock(r.diff)) : h("div", {class:"meta"}, "Отличий от прошлого бэкапа нет или это первый бэкап."), codeBlock(r.config));
 }));
+// обзор конфигурации: что настроено и что стоит сделать
+function overviewView(r, onCmd){
+  if (r.empty) return [h("div", {class:"issue warn"}, "Устройство не показало конфигурацию. Возможно, у пользователя не хватает прав: нужен уровень 15.")];
+  const important = r.advice.filter(a => a.level === "важно").length;
+  return [
+    h("div", {class:"hinttitle"}, "Что стоит сделать" + (important ? " (важных: " + important + ")" : "")),
+    ...r.advice.map(a => h("div", {class:"issue " + (a.level === "важно" ? "err" : "warn")}, a.text, " ",
+      a.cmd && h("button", {class:"btn small", onclick:() => onCmd(a.cmd, r.model)}, "Как это сделать"))),
+    ...r.sections.map(s => h("details", {open:s.title === "Общее"}, h("summary", {class:"hinttitle", style:"cursor:pointer"}, s.title),
+      h("ul", {style:"margin:2px 0 6px;padding-left:18px"}, s.items.map(i => h("li", {class:"note", style:"font-size:13px"}, i)))))];
+}
+async function overviewRun(targetObj, box, onCmd){
+  box.replaceChildren(h("div", {class:"meta"}, "Читаю конфигурацию устройства…"));
+  try {
+    const r = await api("/api/overview", {target:targetObj});
+    const j = await job(r.job);
+    box.replaceChildren(h("div", {class:"hinttitle", style:"font-size:15px"}, "Обзор устройства"), ...overviewView(j.result, onCmd));
+  } catch(e){ box.replaceChildren(h("div", {class:"issue warn"}, "Не удалось прочитать конфигурацию: " + e.message)); }
+}
+async function showCommand(id, mdl){
+  showTab("ref"); $("model").value = mdl; $("q").value = "";
+  try { const r = await api("/api/search?id=" + encodeURIComponent(id) + "&model=" + encodeURIComponent(mdl)); $("results").replaceChildren(...r.items.map(renderCommand)); } catch(e){ toast(e.message); }
+}
+$("ovgo").addEventListener("click", async ev => {
+  if (!CURRENT) return;
+  busy(ev.target, true, "Читаю…");
+  const box = h("div"); outCard("Обзор конфигурации · " + CURRENT.name, box);
+  await overviewRun(target(), box, showCommand);
+  busy(ev.target, false);
+});
+
 $("pushgo").addEventListener("click", async ev => {
   if (!CURRENT){ return; }
   const text = $("pushtext").value; let issues;
@@ -408,6 +494,169 @@ $("pushgo").addEventListener("click", async ev => {
   dlg.showModal();
 });
 
+// ---------------------------------------------------------------- терминал
+const TERM = {id:null, pos:0, model:"", lines:[""], row:0, col:0, esc:null, log:"", queue:"", sending:false, dirty:false};
+const MAXLINES = 5000;
+function termReset(){ TERM.lines = [""]; TERM.row = 0; TERM.col = 0; TERM.esc = null; termDraw(); }
+function termPut(ch){
+  let line = TERM.lines[TERM.row];
+  if (line.length < TERM.col) line += " ".repeat(TERM.col - line.length);
+  TERM.lines[TERM.row] = line.slice(0, TERM.col) + ch + line.slice(TERM.col + 1); TERM.col++;
+}
+function termCsi(params, final){
+  const n = parseInt(params, 10) || 0, line = TERM.lines[TERM.row];
+  if (final === "K"){ TERM.lines[TERM.row] = n === 2 ? "" : n === 1 ? " ".repeat(TERM.col) + line.slice(TERM.col) : line.slice(0, TERM.col); }
+  else if (final === "D") TERM.col = Math.max(0, TERM.col - (n || 1));
+  else if (final === "C") TERM.col += (n || 1);
+  else if (final === "G") TERM.col = Math.max(0, (n || 1) - 1);
+  else if (final === "P") TERM.lines[TERM.row] = line.slice(0, TERM.col) + line.slice(TERM.col + (n || 1));
+  else if (final === "@") TERM.lines[TERM.row] = line.slice(0, TERM.col) + " ".repeat(n || 1) + line.slice(TERM.col);
+  else if (final === "J" && n === 2){ TERM.lines = [""]; TERM.row = 0; TERM.col = 0; }
+}
+function termFeed(text){
+  for (const ch of text){
+    if (TERM.esc !== null){
+      if (TERM.esc === ""){ if (ch === "["){ TERM.esc = "["; } else TERM.esc = null; continue; }
+      if (/[0-9;?]/.test(ch)){ TERM.esc += ch; continue; }
+      termCsi(TERM.esc.slice(1).replace("?", ""), ch); TERM.esc = null; continue;
+    }
+    if (ch === "\x1b") TERM.esc = "";
+    else if (ch === "\r") TERM.col = 0;
+    else if (ch === "\n"){ TERM.row++; if (TERM.row >= TERM.lines.length) TERM.lines.push("");
+      if (TERM.lines.length > MAXLINES){ const cut = TERM.lines.length - MAXLINES; TERM.lines.splice(0, cut); TERM.row -= cut; } }
+    else if (ch === "\b") TERM.col = Math.max(0, TERM.col - 1);
+    else if (ch === "\t") TERM.col = (Math.floor(TERM.col / 8) + 1) * 8;
+    else if (ch >= " " && ch !== "\x7f") termPut(ch);
+  }
+}
+function termDraw(){
+  const el = $("term"), stick = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  const before = TERM.lines.slice(0, TERM.row).join("\n") + (TERM.row ? "\n" : "");
+  const line = TERM.lines[TERM.row] || "", pad = line.length < TERM.col ? " ".repeat(TERM.col - line.length) : "";
+  const full = line + pad, rest = TERM.lines.slice(TERM.row + 1);
+  el.replaceChildren(before + full.slice(0, TERM.col), h("span", {class:"cur"}, full[TERM.col] || " "), full.slice(TERM.col + 1) + (rest.length ? "\n" + rest.join("\n") : ""));
+  if (stick) el.scrollTop = el.scrollHeight;
+  hintLive();
+}
+function termState(kind, text){ $("termstate").replaceChildren(h("span", {class:"dot " + kind}), text); }
+async function termLoop(id){
+  while (TERM.id === id){
+    let r;
+    try { r = await api("/api/term/read?id=" + id + "&pos=" + TERM.pos); }
+    catch(e){ if (TERM.id === id) termEnd(e.message); return; }
+    if (TERM.id !== id) return;
+    if (r.data){ TERM.log += r.data; termFeed(r.data); termDraw(); }
+    TERM.pos = r.pos;
+    if (r.state === "open") termState("on", "Подключено: " + TERM.title);
+    if (r.state === "closed"){ termEnd(r.error || "Сеанс завершён."); return; }
+  }
+}
+function termEnd(msg){
+  TERM.id = null; TERM.queue = ""; termState("", msg); $("termgo").disabled = false; $("termstop").disabled = true;
+  termFeed("\r\n[" + msg + "]\r\n"); termDraw();
+}
+async function termSend(text){
+  if (!TERM.id) return;
+  TERM.queue += text;
+  if (TERM.sending) return;
+  TERM.sending = true;
+  while (TERM.queue && TERM.id){  // по одному запросу за раз, чтобы порядок клавиш не перепутался
+    const data = TERM.queue; TERM.queue = "";
+    try { await api("/api/term/write", {id:TERM.id, data}); } catch(e){ toast(e.message); break; }
+  }
+  TERM.sending = false;
+}
+$("termgo").addEventListener("click", async () => {
+  const d = DEVICES[+$("termdev").value];
+  if (!d){ toast("Сначала добавьте устройство на вкладке «Устройства»."); return; }
+  $("termgo").disabled = true; termReset(); TERM.log = ""; TERM.pos = 0;
+  TERM.model = d.model; TERM.title = d.name + " · " + d.model;
+  termState("wait", "Подключаюсь к " + d.name + "…");
+  const tgt = {...d, password:$("termpass").value};
+  const hintById = async id => {
+    try { const r = await api("/api/search?id=" + encodeURIComponent(id) + "&model=" + encodeURIComponent(d.model)); $("hintq").value = "";
+      $("hintres").replaceChildren(...r.items.map(hintCard)); $("hintres").scrollIntoView({behavior:"smooth", block:"nearest"}); } catch(e){ toast(e.message); }
+  };
+  // через консольный порт второй сеанс открыть нельзя, поэтому конфигурацию читаем до терминала
+  if (d.transport === "serial"){ termState("wait", "Читаю конфигурацию через консоль…"); await overviewRun(tgt, $("overview"), hintById); termState("wait", "Подключаюсь к " + d.name + "…"); }
+  else overviewRun(tgt, $("overview"), hintById);
+  try {
+    const r = await api("/api/term/open", {target:tgt});
+    TERM.id = r.id; $("termstop").disabled = false; $("termpass").value = "";
+    $("hintmodel").textContent = "Подсказки для " + d.model + ". Щёлкните по команде, и она появится в терминале (Enter нажимаете вы).";
+    hintSearch(); $("term").focus(); termLoop(r.id);
+  } catch(e){ termState("", e.message); $("termgo").disabled = false; toast(e.message); }
+});
+$("termstop").addEventListener("click", async () => { const id = TERM.id; if (!id) return; try { await api("/api/term/close", {id}); } catch(e){} });
+$("termclear").addEventListener("click", () => { const line = TERM.lines[TERM.row]; TERM.lines = [line]; TERM.row = 0; termDraw(); $("term").focus(); });
+$("termsave").addEventListener("click", () => {
+  const clean = TERM.log.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\r\n/g, "\n").replace(/\r/g, "");
+  const a = h("a", {href:URL.createObjectURL(new Blob([clean], {type:"text/plain;charset=utf-8"})), download:"eltex-" + (TERM.title || "terminal").replace(/[^\w.-]+/g, "_") + ".log"});
+  document.body.append(a); a.click(); a.remove();
+});
+const pasteText = t => termSend(t.replace(/\r\n|\n/g, "\r"));
+$("termpaste").addEventListener("click", async () => {
+  try { pasteText(await navigator.clipboard.readText()); } catch(e){ toast("Браузер не дал прочитать буфер обмена. Щёлкните по окну терминала и нажмите Ctrl+V."); }
+  $("term").focus();
+});
+$("term").addEventListener("paste", ev => { ev.preventDefault(); pasteText((ev.clipboardData || window.clipboardData).getData("text")); });
+const KEYS = {Enter:"\r", Backspace:"\x7f", Tab:"\t", Escape:"\x1b", ArrowUp:"\x1b[A", ArrowDown:"\x1b[B", ArrowRight:"\x1b[C", ArrowLeft:"\x1b[D", Delete:"\x1b[3~", Home:"\x01", End:"\x05"};
+$("term").addEventListener("keydown", ev => {
+  if (!TERM.id || ev.metaKey || ev.altKey) return;
+  const k = ev.key;
+  if (ev.ctrlKey){
+    if (k === "v" || k === "V" || k === "Insert") return;            // вставка и копирование оставляем браузеру
+    if ((k === "c" || k === "C") && String(getSelection())) return;   // есть выделение: это копирование
+    if (/^[a-zA-Z\[\]\\^_]$/.test(k)){ ev.preventDefault(); termSend(String.fromCharCode(k.toUpperCase().charCodeAt(0) & 31)); }
+    return;
+  }
+  if (ev.shiftKey && k === "Insert") return;
+  let out = KEYS[k];
+  if (out === undefined && k.length === 1) out = k;
+  if (out !== undefined){ ev.preventDefault(); termSend(out); const el = $("term"); el.scrollTop = el.scrollHeight; }
+});
+window.addEventListener("beforeunload", () => { if (TERM.id) navigator.sendBeacon && fetch("/api/term/close", {method:"POST", keepalive:true, headers:{"X-Token":TOKEN, "Content-Type":"application/json"}, body:JSON.stringify({id:TERM.id})}); });
+
+// помощник в окне терминала
+function hintInsert(cmd){
+  const cut = cmd.search(/[<\[{]/); const text = (cut < 0 ? cmd : cmd.slice(0, cut)).replace(/^\s+/, "");
+  if (!TERM.id){ copyText(cmd); return; }
+  termSend(text); $("term").focus();
+  if (cut >= 0) toast("Вставлено до места, где нужно ваше значение: " + cmd.slice(cut).trim());
+}
+function hintCard(c){
+  return h("div", {}, h("div", {class:"hinttitle"}, c.title),
+    c.commands.split("\n").filter(l => l.trim()).map(l => h("button", {class:"hintcmd", title:"Вставить в терминал", onclick:() => hintInsert(l)}, l)),
+    c.explain && h("div", {class:"meta"}, c.explain), c.firmware && h("div", {class:"meta"}, "Версии ПО: " + c.firmware));
+}
+let hintTimer, hintLiveTimer, hintLast = "";
+async function hintSearch(){
+  const q = $("hintq").value.trim();
+  if (!q){ $("hintres").replaceChildren(h("div", {class:"meta"}, "Напишите задачу своими словами, и здесь появятся команды.")); return; }
+  try {
+    const r = await api("/api/search?q=" + encodeURIComponent(q) + "&model=" + encodeURIComponent(TERM.model || model()));
+    $("hintres").replaceChildren(...(r.items.length ? r.items.slice(0, 5).map(hintCard) : [h("div", {class:"meta"}, "Ничего не нашлось.")]));
+  } catch(e){ $("hintres").replaceChildren(h("div", {class:"issue err"}, e.message)); }
+}
+$("hintq").addEventListener("input", () => { clearTimeout(hintTimer); hintTimer = setTimeout(hintSearch, 250); });
+function hintLive(){
+  // строка, которую человек сейчас набирает: всё после приглашения вида «sw1(config)#»
+  const m = /^[\w.\-@:\/]*(?:\([^)]*\))?[>#]\s?(.*)$/.exec(TERM.lines[TERM.row] || "");
+  const typed = m ? m[1].trim() : "";
+  if (typed === hintLast) return;
+  hintLast = typed; clearTimeout(hintLiveTimer);
+  if (!TERM.id || typed.length < 2){ $("hintlive").replaceChildren(); return; }
+  hintLiveTimer = setTimeout(async () => {
+    try {
+      const r = await api("/api/hint", {model:TERM.model, line:typed});
+      if (typed !== hintLast) return;
+      $("hintlive").replaceChildren(
+        ...r.issues.map(i => h("div", {class:"issue " + (i.level === "ошибка" ? "err" : "warn")}, h("b", {}, i.level === "ошибка" ? "Не нажимайте Enter: " : "Внимание: "), i.message)),
+        ...(r.matches.length ? [h("div", {class:"hinttitle"}, "Похоже на"), ...r.matches.map(x => h("div", {title:x.title}, h("div", {class:"hintcmd", style:"cursor:default"}, x.command), h("div", {class:"meta"}, x.title)))] : []));
+    } catch(e){}
+  }, 300);
+}
+
 // ---------------------------------------------------------------- запуск
 (async () => {
   try {
@@ -415,7 +664,7 @@ $("pushgo").addEventListener("click", async ev => {
     $("ver").textContent = "версия " + META.version;
     $("model").replaceChildren(h("option", {value:""}, "Все модели"), ...META.models.map(m => h("option", {value:m.name}, m.name + (m.unverified ? " (?)" : ""))));
     $("tplsel").replaceChildren(...META.templates.map(t => h("option", {value:t.name}, t.title)));
-    renderTplForm(); doSearch(); loadDevices();
+    renderTplForm(); doSearch(); loadDevices(); termDraw(); hintSearch();
   } catch(e){ document.querySelector("main").replaceChildren(h("div", {class:"issue err"}, e.message)); }
 })();
 </script>

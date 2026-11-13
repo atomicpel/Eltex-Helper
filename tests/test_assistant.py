@@ -618,3 +618,243 @@ def test_long_output_on_mes24xx_is_fast_and_complete(serial_dev, paging_off):
     assert out.count("end-of-config") == 2 and out.count("description port60") == 2
     assert "More" not in out
     assert elapsed < 25, f"слишком долго: {elapsed:.0f} с"
+
+
+# ------------------------------------------------- живой терминал (как PuTTY)
+
+class FakeTelnetSwitch:
+    """Коммутатор по telnet: согласование опций, логин, эхо, ответы на команды."""
+
+    def __init__(self):
+        self.listener = socket.socket()
+        self.listener.bind(("127.0.0.1", 0))
+        self.listener.listen(2)
+        self.port = self.listener.getsockname()[1]
+        self.negotiation = b""
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        try:
+            conn, _ = self.listener.accept()
+        except OSError:
+            return
+        with conn:
+            conn.sendall(b"\xff\xfb\x01\xff\xfb\x03\xff\xfd\x18\r\nUser Name:")  # WILL ECHO, WILL SGA, DO TTYPE
+            state, line = "user", b""
+            while True:
+                try:
+                    data = conn.recv(1024)
+                except OSError:
+                    return
+                if not data:
+                    return
+                for b in data:
+                    ch = bytes([b])
+                    if b == 0xFF or (self.negotiation and len(self.negotiation) % 3):
+                        self.negotiation += ch
+                        continue
+                    if ch == b"?" and state == "exec":
+                        conn.sendall(b"?\r\n  show     Show running system information\r\nsw1#" + line)
+                        continue
+                    if ch not in (b"\r", b"\n"):
+                        line += ch
+                        if state != "pass":
+                            conn.sendall(ch)
+                        continue
+                    text, line = line.decode(), b""
+                    if state == "user":
+                        state = "pass"
+                        conn.sendall(b"\r\nPassword:")
+                    elif state == "pass":
+                        state = "exec" if text == "s3cret" else "user"
+                        conn.sendall(b"\r\nsw1#" if state == "exec" else b"\r\nUser Name:")
+                    elif text == "exit":
+                        return
+                    else:
+                        out = "Active-image: 4.0.27.4" if text == "show bootvar" else "% Unrecognized command"
+                        conn.sendall(("\r\n" + out + "\r\nsw1#").encode())
+
+    def close(self):
+        self.listener.close()
+
+
+def _term_read_until(read, needle, timeout=10):
+    text, pos, deadline = "", 0, time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        r = read(pos)
+        text, pos = text + r["data"], r["pos"]
+        if needle in text or r["state"] == "closed":
+            return text, r
+    raise AssertionError(f"не дождались {needle!r}: {text!r}")
+
+
+def test_terminal_telnet_session_is_live():
+    from eltex_assistant import terminal
+
+    fake = FakeTelnetSwitch()
+    dev = automation.Device("sw", "127.0.0.1", "MES2324", username="admin", port=fake.port, transport="telnet")
+    s = terminal.Session(dev, "s3cret")
+    try:
+        text, _ = _term_read_until(lambda pos: s.read(pos, wait=1), "sw1#")  # логин и пароль введены сами
+        assert "User Name:" in text and "s3cret" not in text and "\xff" not in text
+        s.write("show boot")
+        echoed, r = _term_read_until(lambda pos: s.read(pos, wait=1), "show boot")  # эхо до нажатия Enter
+        assert r["state"] == "open"
+        s.write("?")  # подсказка устройства приходит сразу, без Enter
+        _term_read_until(lambda pos: s.read(pos, wait=1), "Show running system information")
+        s.write("var\r")
+        text, _ = _term_read_until(lambda pos: s.read(pos, wait=1), "4.0.27.4")
+        assert fake.negotiation.startswith(b"\xff\xfd\x01\xff\xfd\x03\xff\xfc\x18")  # DO ECHO, DO SGA, WONT TTYPE
+        s.write("exit\r")
+        _, r = _term_read_until(lambda pos: s.read(pos, wait=1), "\x00никогда")
+        assert r["state"] == "closed"
+        with pytest.raises(terminal.TermError):
+            s.write("x")
+    finally:
+        s.close()
+        fake.close()
+
+
+def test_terminal_reports_unreachable_device():
+    from eltex_assistant import terminal
+
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    s = terminal.Session(automation.Device("sw", "127.0.0.1", "MES2324", port=port, transport="telnet"), "x")
+    _, r = _term_read_until(lambda pos: s.read(pos, wait=1), "\x00никогда")
+    assert r["state"] == "closed" and "не отвечает" in r["error"]
+
+
+def test_gui_terminal_api_and_hints(web):
+    fake = FakeTelnetSwitch()
+    target = {"name": "sw", "host": "127.0.0.1", "model": "MES2324", "transport": "telnet", "port": fake.port,
+              "username": "admin", "password": "s3cret"}
+    try:
+        code, opened = web("/api/term/open", {"target": target})
+        assert code == 200 and opened["family"] == "mes23xx"
+        sid = opened["id"]
+        read = lambda pos: web(f"/api/term/read?id={sid}&pos={pos}&wait=1")[1]  # noqa: E731
+        _term_read_until(read, "sw1#")
+        assert web("/api/term/write", {"id": sid, "data": "show bootvar\r"})[0] == 200
+        _term_read_until(read, "4.0.27.4")
+        assert web("/api/term/close", {"id": sid})[0] == 200
+        assert read(0)["state"] == "closed"
+        assert web("/api/term/write", {"id": sid, "data": "x"})[0] == 400
+        assert web("/api/term/read?id=nope&pos=0")[0] == 400
+        assert web("/api/term/open", {"target": target}, token="wrong")[0] == 403
+    finally:
+        fake.close()
+    # помощник: подсказка к набираемой строке
+    _, hint = web("/api/hint", {"model": "MES2408B", "line": "vlan database"})
+    assert hint["issues"] and hint["issues"][0]["level"] == "ошибка"
+    _, hint = web("/api/hint", {"model": "MES2324", "line": "switchport tr"})
+    assert any(m["command"].startswith("switchport trunk allowed vlan add") for m in hint["matches"])
+    assert web("/api/hint", {"model": "MES2324", "line": "s"})[1] == {"issues": [], "matches": []}
+
+
+# ------------------------------------------------- обзор конфигурации при подключении
+
+MES23_CFG = """
+vlan database
+ vlan 10,20,100-102
+exit
+hostname sw-floor1
+interface gigabitethernet1/0/1
+ description PC-1
+ switchport access vlan 10
+exit
+interface gigabitethernet1/0/2
+ switchport access vlan 10
+exit
+interface tengigabitethernet1/0/1
+ switchport mode trunk
+ switchport trunk allowed vlan add 10,20,100
+exit
+interface tengigabitethernet1/0/2
+ description to-core
+ switchport mode trunk
+exit
+interface vlan 100
+ ip address 10.0.100.11 255.255.255.0
+exit
+username admin password encrypted 0123456789abcdef privilege 15
+snmp-server server
+snmp-server community public ro
+"""
+
+ESR_CFG = """
+hostname esr-office
+interface gigabitethernet 1/0/1
+  description WAN
+  security-zone untrusted
+  ip address dhcp
+exit
+interface gigabitethernet 1/0/2
+  ip address 192.168.1.1/24
+exit
+security zone-pair untrusted self
+  rule 1
+    action permit
+    enable
+  exit
+exit
+ip ssh server
+ip telnet server
+"""
+
+
+def _overview(text, family):
+    from eltex_assistant import analyzer
+
+    r = analyzer.analyze(text, family)
+    facts = "\n".join(i for s in r["sections"] for i in s["items"])
+    advice = {a["cmd"]: a for a in r["advice"]}
+    return r, facts, advice
+
+
+def test_overview_of_mes23xx_config():
+    r, facts, advice = _overview(MES23_CFG, "mes23xx")
+    assert "Имя устройства: sw-floor1" in facts and "VLAN 100: 10.0.100.11" in facts
+    assert "10, 20, 100-102" in facts and "порты gi1/0/1-2" in facts
+    assert "te1/0/1: trunk, VLAN: 10,20,100" in facts and "te1/0/2: trunk, список VLAN не задан (to-core)" in facts
+    assert advice["ssh-enable"]["level"] == "важно" and advice["snmp"]["level"] == "важно"
+    assert "te1/0/2" in advice["port-trunk"]["text"] and "mgmt-ip" in advice
+    assert r["advice"][0]["level"] == "важно" and r["advice"][-1]["level"] == "совет"  # важное сверху
+    assert "0123456789abcdef" not in str(r) and "public ro" not in str(r)  # секреты в обзор не попадают
+    for a in r["advice"]:  # каждая ссылка «как это сделать» ведёт на существующую запись справочника
+        assert knowledge.get_command(a["cmd"], "mes23xx"), a
+
+
+def test_overview_of_esr_and_mes24xx_config():
+    r, facts, advice = _overview(ESR_CFG, "esr")
+    assert "gigabitethernet 1/0/1: dhcp, зона untrusted (WAN)" in facts
+    assert any("без зоны безопасности: gigabitethernet 1/0/2" in a["text"] for a in r["advice"])
+    assert any("открыт из интернета" in a["text"] for a in r["advice"])
+    assert all(knowledge.get_command(a["cmd"], "esr") for a in r["advice"])
+    ports = "".join(f"interface gigabitethernet 1/0/{n}\nswitchport mode access\nswitchport access vlan 10\n"
+                    "spanning-tree portfast\nspanning-tree bpduguard enable\n!\n" for n in range(1, 9))
+    text = ("vlan 10,100\n vlan active\n!\n" + ports + "interface gigabitethernet 1/0/9\nswitchport mode trunk\n!\n"
+            "interface vlan 1\nip address 192.168.1.239 255.255.255.0\nno shutdown\n!\nssh enable\n")  # вывод без отступов
+    r, facts, advice = _overview(text, "mes24xx")
+    assert "порты gi1/0/1-8" in facts and "gi1/0/9: trunk" in facts and "stp" not in advice
+    assert all(knowledge.get_command(a["cmd"], "mes24xx") for a in r["advice"])
+    assert _overview("% Unrecognized command", "mes23xx")[0]["empty"]
+
+
+def test_gui_overview_reads_config_on_connect(web, monkeypatch):
+    monkeypatch.setattr(automation, "read_config", lambda dev, pw: MES23_CFG)
+    target = {"name": "sw", "host": "10.0.0.1", "model": "MES2324", "password": "x"}
+    j = web.wait(web("/api/overview", {"target": target})[1]["job"])
+    assert j["error"] is None and j["result"]["model"] == "MES2324"
+    assert j["result"]["advice"] and j["result"]["sections"][0]["title"] == "Общее"
+    _, found = web("/api/search?id=ssh-enable&model=MES2324")
+    assert [c["id"] for c in found["items"]] == ["ssh-enable"]
+
+    def boom(dev, pw):
+        raise TimeoutError()
+
+    monkeypatch.setattr(automation, "read_config", boom)
+    j = web.wait(web("/api/overview", {"target": target})[1]["job"])
+    assert "не отвечает" in j["error"]
