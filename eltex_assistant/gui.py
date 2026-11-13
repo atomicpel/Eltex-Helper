@@ -88,7 +88,10 @@ class App:
     def search(self, q) -> dict:
         family = knowledge.resolve_family(q.get("model") or None)
         text = (q.get("q") or "").strip()
-        if text:
+        if q.get("id"):
+            c = knowledge.get_command(q["id"], family) if family else None
+            items = [c] if c else []
+        elif text:
             items = [c for _, c in knowledge.search(text, family, limit=12)]
         else:
             items = knowledge.commands(family)
@@ -298,6 +301,20 @@ class App:
                     matches.append({"command": cmd, "title": c.title, "id": c.id})
         return {"issues": [i for i in self._issues(line, family) if i["line_no"]], "matches": matches[:8]}
 
+    def overview(self, body) -> dict:
+        """Читает конфигурацию с устройства и рассказывает, что настроено и что стоит сделать."""
+        from . import analyzer, automation
+
+        dev, password = self._device(body.get("target"))
+
+        def work(job):
+            job["log"].append("Читаю конфигурацию…")
+            result = analyzer.analyze(automation.read_config(dev, password), dev.family)
+            result["model"] = dev.model
+            return result
+
+        return {"job": self.jobs.start(self._wrap(dev, work))}
+
     def job(self, q) -> dict:
         j = self.jobs.get(q.get("id", ""))
         return {k: j[k] for k in ("done", "log", "result", "error", "progress")}
@@ -307,7 +324,7 @@ class App:
     ROUTES_POST = {"/api/render": "render", "/api/check": "check", "/api/inventory": "inventory_save",
                    "/api/scan": "scan", "/api/run": "run", "/api/backup": "backup", "/api/push": "push",
                    "/api/term/open": "term_open", "/api/term/write": "term_write", "/api/term/close": "term_close",
-                   "/api/hint": "hint"}
+                   "/api/hint": "hint", "/api/overview": "overview"}
 
 
 def make_handler(app: App, allowed_hosts: set[str]):

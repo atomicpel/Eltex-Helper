@@ -752,3 +752,109 @@ def test_gui_terminal_api_and_hints(web):
     _, hint = web("/api/hint", {"model": "MES2324", "line": "switchport tr"})
     assert any(m["command"].startswith("switchport trunk allowed vlan add") for m in hint["matches"])
     assert web("/api/hint", {"model": "MES2324", "line": "s"})[1] == {"issues": [], "matches": []}
+
+
+# ------------------------------------------------- обзор конфигурации при подключении
+
+MES23_CFG = """
+vlan database
+ vlan 10,20,100-102
+exit
+hostname sw-floor1
+interface gigabitethernet1/0/1
+ description PC-1
+ switchport access vlan 10
+exit
+interface gigabitethernet1/0/2
+ switchport access vlan 10
+exit
+interface tengigabitethernet1/0/1
+ switchport mode trunk
+ switchport trunk allowed vlan add 10,20,100
+exit
+interface tengigabitethernet1/0/2
+ description to-core
+ switchport mode trunk
+exit
+interface vlan 100
+ ip address 10.0.100.11 255.255.255.0
+exit
+username admin password encrypted 0123456789abcdef privilege 15
+snmp-server server
+snmp-server community public ro
+"""
+
+ESR_CFG = """
+hostname esr-office
+interface gigabitethernet 1/0/1
+  description WAN
+  security-zone untrusted
+  ip address dhcp
+exit
+interface gigabitethernet 1/0/2
+  ip address 192.168.1.1/24
+exit
+security zone-pair untrusted self
+  rule 1
+    action permit
+    enable
+  exit
+exit
+ip ssh server
+ip telnet server
+"""
+
+
+def _overview(text, family):
+    from eltex_assistant import analyzer
+
+    r = analyzer.analyze(text, family)
+    facts = "\n".join(i for s in r["sections"] for i in s["items"])
+    advice = {a["cmd"]: a for a in r["advice"]}
+    return r, facts, advice
+
+
+def test_overview_of_mes23xx_config():
+    r, facts, advice = _overview(MES23_CFG, "mes23xx")
+    assert "Имя устройства: sw-floor1" in facts and "VLAN 100: 10.0.100.11" in facts
+    assert "10, 20, 100-102" in facts and "порты gi1/0/1-2" in facts
+    assert "te1/0/1: trunk, VLAN: 10,20,100" in facts and "te1/0/2: trunk, список VLAN не задан (to-core)" in facts
+    assert advice["ssh-enable"]["level"] == "важно" and advice["snmp"]["level"] == "важно"
+    assert "te1/0/2" in advice["port-trunk"]["text"] and "mgmt-ip" in advice
+    assert r["advice"][0]["level"] == "важно" and r["advice"][-1]["level"] == "совет"  # важное сверху
+    assert "0123456789abcdef" not in str(r) and "public ro" not in str(r)  # секреты в обзор не попадают
+    for a in r["advice"]:  # каждая ссылка «как это сделать» ведёт на существующую запись справочника
+        assert knowledge.get_command(a["cmd"], "mes23xx"), a
+
+
+def test_overview_of_esr_and_mes24xx_config():
+    r, facts, advice = _overview(ESR_CFG, "esr")
+    assert "gigabitethernet 1/0/1: dhcp, зона untrusted (WAN)" in facts
+    assert any("без зоны безопасности: gigabitethernet 1/0/2" in a["text"] for a in r["advice"])
+    assert any("открыт из интернета" in a["text"] for a in r["advice"])
+    assert all(knowledge.get_command(a["cmd"], "esr") for a in r["advice"])
+    ports = "".join(f"interface gigabitethernet 1/0/{n}\nswitchport mode access\nswitchport access vlan 10\n"
+                    "spanning-tree portfast\nspanning-tree bpduguard enable\n!\n" for n in range(1, 9))
+    text = ("vlan 10,100\n vlan active\n!\n" + ports + "interface gigabitethernet 1/0/9\nswitchport mode trunk\n!\n"
+            "interface vlan 1\nip address 192.168.1.239 255.255.255.0\nno shutdown\n!\nssh enable\n")  # вывод без отступов
+    r, facts, advice = _overview(text, "mes24xx")
+    assert "порты gi1/0/1-8" in facts and "gi1/0/9: trunk" in facts and "stp" not in advice
+    assert all(knowledge.get_command(a["cmd"], "mes24xx") for a in r["advice"])
+    assert _overview("% Unrecognized command", "mes23xx")[0]["empty"]
+
+
+def test_gui_overview_reads_config_on_connect(web, monkeypatch):
+    monkeypatch.setattr(automation, "read_config", lambda dev, pw: MES23_CFG)
+    target = {"name": "sw", "host": "10.0.0.1", "model": "MES2324", "password": "x"}
+    j = web.wait(web("/api/overview", {"target": target})[1]["job"])
+    assert j["error"] is None and j["result"]["model"] == "MES2324"
+    assert j["result"]["advice"] and j["result"]["sections"][0]["title"] == "Общее"
+    _, found = web("/api/search?id=ssh-enable&model=MES2324")
+    assert [c["id"] for c in found["items"]] == ["ssh-enable"]
+
+    def boom(dev, pw):
+        raise TimeoutError()
+
+    monkeypatch.setattr(automation, "read_config", boom)
+    j = web.wait(web("/api/overview", {"target": target})[1]["job"])
+    assert "не отвечает" in j["error"]

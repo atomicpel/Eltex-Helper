@@ -208,6 +208,12 @@ def run_many(devs: list[Device], passwords: dict[str, str], cmds: list[str], wor
         return dict(ex.map(job, devs))
 
 
+def read_config(dev: Device, password: str) -> str:
+    """Текущая конфигурация устройства (для обзора при подключении)."""
+    with connect(dev, password) as conn:
+        return send_show(conn, "show running-config", read_timeout=120)
+
+
 # ---------------------------------------------------------------- бэкапы
 
 def backup(dev: Device, password: str, out_dir: str | Path) -> tuple[Path, str]:

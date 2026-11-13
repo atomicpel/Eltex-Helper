@@ -162,7 +162,7 @@ main.wide{max-width:none}
             <h3>Выполнить команды</h3>
             <div class="meta" id="quick"></div>
             <textarea id="cmds" style="min-height:110px" placeholder="show version"></textarea>
-            <p><button class="btn primary" id="rungo">Выполнить</button> <button class="btn" id="bakgo">Сделать бэкап</button></p>
+            <p><button class="btn primary" id="rungo">Выполнить</button> <button class="btn" id="bakgo">Сделать бэкап</button> <button class="btn" id="ovgo">Обзор конфигурации</button></p>
           </div>
           <div class="card">
             <h3>Применить конфигурацию</h3>
@@ -197,10 +197,11 @@ main.wide{max-width:none}
         <div class="helper">
           <div class="card">
             <h3>Помощник</h3>
-            <div class="meta" id="hintmodel">Подключитесь к устройству, и подсказки будут под его модель.</div>
+            <div class="meta" id="hintmodel">Подключитесь к устройству: программа прочитает его конфигурацию, расскажет, что настроено, и подскажет, что сделать.</div>
             <div id="hintlive"></div>
             <input id="hintq" placeholder="Что нужно сделать? Например: транк">
             <div id="hintres"></div>
+            <div id="overview"></div>
           </div>
         </div>
       </div>
@@ -447,6 +448,37 @@ $("rungo").addEventListener("click", ev => devOp(ev.target, "Команды", "/
 $("bakgo").addEventListener("click", ev => devOp(ev.target, "Бэкап", "/api/backup", {target:target()}, (c, r) => {
   c.append(h("div", {class:"issue ok"}, "Сохранено в " + r.path), r.diff ? h("div", {}, h("div", {class:"meta"}, "Изменения с прошлого бэкапа"), codeBlock(r.diff)) : h("div", {class:"meta"}, "Отличий от прошлого бэкапа нет или это первый бэкап."), codeBlock(r.config));
 }));
+// обзор конфигурации: что настроено и что стоит сделать
+function overviewView(r, onCmd){
+  if (r.empty) return [h("div", {class:"issue warn"}, "Устройство не показало конфигурацию. Возможно, у пользователя не хватает прав: нужен уровень 15.")];
+  const important = r.advice.filter(a => a.level === "важно").length;
+  return [
+    h("div", {class:"hinttitle"}, "Что стоит сделать" + (important ? " (важных: " + important + ")" : "")),
+    ...r.advice.map(a => h("div", {class:"issue " + (a.level === "важно" ? "err" : "warn")}, a.text, " ",
+      a.cmd && h("button", {class:"btn small", onclick:() => onCmd(a.cmd, r.model)}, "Как это сделать"))),
+    ...r.sections.map(s => h("details", {open:s.title === "Общее"}, h("summary", {class:"hinttitle", style:"cursor:pointer"}, s.title),
+      h("ul", {style:"margin:2px 0 6px;padding-left:18px"}, s.items.map(i => h("li", {class:"note", style:"font-size:13px"}, i)))))];
+}
+async function overviewRun(targetObj, box, onCmd){
+  box.replaceChildren(h("div", {class:"meta"}, "Читаю конфигурацию устройства…"));
+  try {
+    const r = await api("/api/overview", {target:targetObj});
+    const j = await job(r.job);
+    box.replaceChildren(h("div", {class:"hinttitle", style:"font-size:15px"}, "Обзор устройства"), ...overviewView(j.result, onCmd));
+  } catch(e){ box.replaceChildren(h("div", {class:"issue warn"}, "Не удалось прочитать конфигурацию: " + e.message)); }
+}
+async function showCommand(id, mdl){
+  showTab("ref"); $("model").value = mdl; $("q").value = "";
+  try { const r = await api("/api/search?id=" + encodeURIComponent(id) + "&model=" + encodeURIComponent(mdl)); $("results").replaceChildren(...r.items.map(renderCommand)); } catch(e){ toast(e.message); }
+}
+$("ovgo").addEventListener("click", async ev => {
+  if (!CURRENT) return;
+  busy(ev.target, true, "Читаю…");
+  const box = h("div"); outCard("Обзор конфигурации · " + CURRENT.name, box);
+  await overviewRun(target(), box, showCommand);
+  busy(ev.target, false);
+});
+
 $("pushgo").addEventListener("click", async ev => {
   if (!CURRENT){ return; }
   const text = $("pushtext").value; let issues;
@@ -540,8 +572,16 @@ $("termgo").addEventListener("click", async () => {
   $("termgo").disabled = true; termReset(); TERM.log = ""; TERM.pos = 0;
   TERM.model = d.model; TERM.title = d.name + " · " + d.model;
   termState("wait", "Подключаюсь к " + d.name + "…");
+  const tgt = {...d, password:$("termpass").value};
+  const hintById = async id => {
+    try { const r = await api("/api/search?id=" + encodeURIComponent(id) + "&model=" + encodeURIComponent(d.model)); $("hintq").value = "";
+      $("hintres").replaceChildren(...r.items.map(hintCard)); $("hintres").scrollIntoView({behavior:"smooth", block:"nearest"}); } catch(e){ toast(e.message); }
+  };
+  // через консольный порт второй сеанс открыть нельзя, поэтому конфигурацию читаем до терминала
+  if (d.transport === "serial"){ termState("wait", "Читаю конфигурацию через консоль…"); await overviewRun(tgt, $("overview"), hintById); termState("wait", "Подключаюсь к " + d.name + "…"); }
+  else overviewRun(tgt, $("overview"), hintById);
   try {
-    const r = await api("/api/term/open", {target:{...d, password:$("termpass").value}});
+    const r = await api("/api/term/open", {target:tgt});
     TERM.id = r.id; $("termstop").disabled = false; $("termpass").value = "";
     $("hintmodel").textContent = "Подсказки для " + d.model + ". Щёлкните по команде, и она появится в терминале (Enter нажимаете вы).";
     hintSearch(); $("term").focus(); termLoop(r.id);
