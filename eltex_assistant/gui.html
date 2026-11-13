@@ -162,7 +162,7 @@ main.wide{max-width:none}
             <h3>Выполнить команды</h3>
             <div class="meta" id="quick"></div>
             <textarea id="cmds" style="min-height:110px" placeholder="show version"></textarea>
-            <p><button class="btn primary" id="rungo">Выполнить</button> <button class="btn" id="bakgo">Сделать бэкап</button> <button class="btn" id="ovgo">Обзор конфигурации</button></p>
+            <p><button class="btn primary" id="rungo">Выполнить</button> <button class="btn" id="bakgo">Сделать бэкап</button> <button class="btn" id="ovgo">Обзор конфигурации</button> <button class="btn" id="fwgo">Обновление ПО</button></p>
           </div>
           <div class="card">
             <h3>Применить конфигурацию</h3>
@@ -477,6 +477,79 @@ $("ovgo").addEventListener("click", async ev => {
   const box = h("div"); outCard("Обзор конфигурации · " + CURRENT.name, box);
   await overviewRun(target(), box, showCommand);
   busy(ev.target, false);
+});
+
+// обновление ПО: проверка версии, скачивание, загрузка по TFTP и перезагрузка по отдельному подтверждению
+function confirmDlg(title, lines, okLabel, onOk){
+  const dlg = $("dlg");
+  dlg.replaceChildren(h("h2", {style:"margin-top:0"}, title), ...lines.map(l => h("p", {class:"note"}, l)),
+    h("p", {style:"text-align:right;margin-bottom:0"}, h("button", {class:"btn", onclick:() => dlg.close()}, "Отмена"), " ",
+      h("button", {class:"btn danger", onclick:() => { dlg.close(); onOk(); }}, okLabel)));
+  dlg.showModal();
+}
+async function fwJob(card, path, body){
+  const log = h("div", {class:"note"}); card.append(log);
+  const r = await api(path, body);
+  const j = await job(r.job, s => {
+    const kids = s.log.map(l => h("div", {}, l));
+    if (s.progress && s.progress[1]) kids.push(h("div", {}, "Скачано " + Math.floor(s.progress[0] * 100 / s.progress[1]) + " %"));
+    log.replaceChildren(...kids);
+  });
+  return j.result;
+}
+function fwReloadButton(card, tgt, name){
+  const btn = h("button", {class:"btn danger", onclick:() => confirmDlg("Перезагрузить " + name + "?",
+    ["Устройство перестанет работать на несколько минут, связь через него пропадёт.", "Конфигурация перед перезагрузкой будет сохранена. Не выключайте питание, пока устройство не загрузится."],
+    "Перезагрузить", async () => {
+      btn.disabled = true;
+      try {
+        const r = await fwJob(card, "/api/fw/reload", {target:tgt, confirm:true});
+        card.append(h("div", {class:"issue ok"}, r.version ? "Устройство загрузилось, версия ПО: " + r.version + "." : "Команда перезагрузки отправлена."));
+      } catch(e){ card.append(h("div", {class:"issue err"}, e.message)); btn.disabled = false; }
+    })}, "Перезагрузить сейчас");
+  return btn;
+}
+async function fwUpload(card, tgt, name, what, body){
+  try {
+    const r = await fwJob(card, "/api/fw/upload", {target:tgt, confirm:true, ...body});
+    card.append(h("div", {class:"issue ok"}, "ПО " + (r.version || r.image) + " записано на устройство. Оно начнёт работать после перезагрузки."),
+      h("details", {}, h("summary", {class:"meta", style:"cursor:pointer"}, "Что показало устройство (show bootvar)"), codeBlock(r.bootvar)),
+      h("p", {}, fwReloadButton(card, tgt, name), " ", h("span", {class:"meta"}, "Можно перезагрузить позже, в удобное время.")));
+  } catch(e){ card.append(h("div", {class:"issue err", style:"white-space:pre-wrap"}, e.message)); }
+}
+$("fwgo").addEventListener("click", async ev => {
+  if (!CURRENT) return;
+  const tgt = target(), name = CURRENT.name, btn = ev.target;
+  busy(btn, true, "Проверяю…");
+  const card = outCard("Обновление ПО · " + name);
+  try {
+    const r = await fwJob(card, "/api/fw/check", {target:tgt});
+    card.lastChild.remove();
+    card.append(h("div", {}, "На устройстве сейчас: ", h("b", {}, r.current || "версия не определена")));
+    const askUpload = (what, body) => confirmDlg("Загрузить ПО " + what + " на " + name + "?",
+      ["Программа сделает резервную копию конфигурации, запустит на этом компьютере TFTP-сервер и даст устройству команду забрать файл.",
+       "Устройство при этом продолжит работать. Перезагрузка выполняется отдельно и только после вашего подтверждения.",
+       "Если брандмауэр Windows спросит про доступ к сети, разрешите его: иначе устройство не сможет забрать файл."],
+      "Загрузить", () => fwUpload(card, tgt, name, what, body));
+    if (r.site_error) card.append(h("div", {class:"issue warn"}, r.site_error));
+    else if (!r.releases.length) card.append(h("div", {class:"issue warn"}, "На сайте Eltex для этой модели файлов ПО не нашлось."), r.page && h("div", {class:"meta"}, "Страница загрузок: " + r.page));
+    else {
+      const top = r.releases[0];
+      card.append(h("div", {}, "На сайте Eltex: ", h("b", {}, top.version), h("span", {class:"meta"}, " · " + top.name + (top.size ? " · " + top.size : "") + (top.date ? " · " + top.date : ""))));
+      if (r.lifecycle.length) card.append(h("div", {class:"meta"}, "Статус модели: " + r.lifecycle.join(", ")));
+      r.plan.blockers.forEach(b => card.append(h("div", {class:"issue " + (b.indexOf("уже установлена") >= 0 ? "ok" : "err")}, b)));
+      if (r.plan.ok){
+        r.plan.warnings.forEach(w => card.append(h("div", {class:"issue warn"}, w)));
+        card.append(h("p", {}, h("button", {class:"btn primary", onclick:() => askUpload(top.version, {url:top.url})}, "Скачать и загрузить " + top.version)));
+      }
+      if (r.notes) card.append(h("details", {}, h("summary", {class:"meta", style:"cursor:pointer"}, "Что нового в версии " + top.version), h("pre", {style:"white-space:pre-wrap;max-height:260px"}, r.notes)));
+    }
+    const file = h("input", {type:"text", placeholder:"C:\\Downloads\\mes3300-4027-4R1.zip", style:"width:100%"});
+    card.append(h("details", {}, h("summary", {class:"meta", style:"cursor:pointer"}, "Загрузить из файла, скачанного вручную"),
+      h("div", {class:"meta"}, "Путь к архиву zip с сайта Eltex или к самому файлу ПО на этом компьютере."), file,
+      h("p", {}, h("button", {class:"btn", onclick:() => { if (file.value.trim()) askUpload("из файла", {file:file.value.trim()}); }}, "Загрузить из файла"))));
+  } catch(e){ card.append(h("div", {class:"issue err"}, e.message)); }
+  busy(btn, false);
 });
 
 $("pushgo").addEventListener("click", async ev => {
