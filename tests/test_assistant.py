@@ -543,7 +543,7 @@ def test_real_ssh_session_end_to_end():
                         os.write(fake.slave, data)
                     if fake.slave in r:
                         chan.send(os.read(fake.slave, 1024))
-                except OSError:
+                except (OSError, EOFError):  # клиент закрыл сеанс: ждём следующее подключение
                     break
             t.close()
 
