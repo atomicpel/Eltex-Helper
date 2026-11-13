@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, urlparse
 
 import yaml
 
-from . import __version__, checker, knowledge, templates
+from . import __version__, checker, knowledge, templates, terminal
 
 HTML = Path(__file__).parent / "gui.html"
 
@@ -63,6 +63,7 @@ class App:
     def __init__(self, inventory_path: str | Path = "inventory.yaml") -> None:
         self.token = secrets.token_urlsafe(24)
         self.jobs = Jobs()
+        self.terms = terminal.Sessions()
         self.inventory_path = Path(inventory_path)
 
     # ------------------------------------------------------------ справочник
@@ -253,14 +254,60 @@ class App:
 
         return {"job": self.jobs.start(self._wrap(dev, work))}
 
+    # ------------------------------------------------------------ живой терминал
+
+    def term_open(self, body) -> dict:
+        dev, password = self._device(body.get("target"))
+        return {"id": self.terms.open(dev, password).id, "family": dev.family}
+
+    def term_read(self, q) -> dict:
+        try:
+            return self.terms.get(q.get("id", "")).read(int(q.get("pos") or 0), wait=min(float(q.get("wait") or 15), 25.0))
+        except terminal.TermError as e:
+            raise ApiError(str(e)) from e
+
+    def term_write(self, body) -> dict:
+        data = body.get("data")
+        if not isinstance(data, str) or len(data) > 100_000:
+            raise ApiError("Слишком длинная вставка")
+        try:
+            self.terms.get(body.get("id", "")).write(data)
+        except terminal.TermError as e:
+            raise ApiError(str(e)) from e
+        return {"ok": True}
+
+    def term_close(self, body) -> dict:
+        try:
+            self.terms.get(body.get("id", "")).close()
+        except terminal.TermError:
+            pass
+        return {"ok": True}
+
+    def hint(self, body) -> dict:
+        """Подсказка к строке, которую человек сейчас набирает в терминале."""
+        family = knowledge.resolve_family(body.get("model"))
+        line = " ".join(str(body.get("line") or "").split())
+        if not family or len(line) < 2:
+            return {"issues": [], "matches": []}
+        low, matches, seen = line.lower(), [], set()
+        for c in knowledge.commands(family):
+            for raw in str(c.commands).splitlines():
+                cmd = raw.strip()
+                if cmd and cmd.lower().startswith(low) and cmd not in seen:
+                    seen.add(cmd)
+                    matches.append({"command": cmd, "title": c.title, "id": c.id})
+        return {"issues": [i for i in self._issues(line, family) if i["line_no"]], "matches": matches[:8]}
+
     def job(self, q) -> dict:
         j = self.jobs.get(q.get("id", ""))
         return {k: j[k] for k in ("done", "log", "result", "error", "progress")}
 
     ROUTES_GET = {"/api/meta": "meta", "/api/search": "search", "/api/inventory": "inventory_get",
-                  "/api/ports": "ports", "/api/job": "job"}
+                  "/api/ports": "ports", "/api/job": "job", "/api/term/read": "term_read"}
     ROUTES_POST = {"/api/render": "render", "/api/check": "check", "/api/inventory": "inventory_save",
-                   "/api/scan": "scan", "/api/run": "run", "/api/backup": "backup", "/api/push": "push"}
+                   "/api/scan": "scan", "/api/run": "run", "/api/backup": "backup", "/api/push": "push",
+                   "/api/term/open": "term_open", "/api/term/write": "term_write", "/api/term/close": "term_close",
+                   "/api/hint": "hint"}
 
 
 def make_handler(app: App, allowed_hosts: set[str]):
@@ -350,4 +397,5 @@ def serve(port: int = 8765, open_browser: bool = True, inventory: str | Path = "
     except KeyboardInterrupt:
         print("\nОстановлено.")
     finally:
+        app.terms.close_all()
         httpd.server_close()
